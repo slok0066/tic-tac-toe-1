@@ -144,39 +144,111 @@ io.on('connection', (socket) => {
   socket.on('join_room', (data) => {
     try {
       const roomCode = data?.roomCode;
+      console.log(`Player ${socket.id} is trying to join room ${roomCode}`);
       
       if (!roomCode) {
+        console.error("No room code provided");
         socket.emit('error', 'Room code is required');
         return;
       }
       
+      // Check if the room exists
       const room = rooms.get(roomCode);
-      
       if (!room) {
+        console.error(`Room ${roomCode} not found`);
         socket.emit('error', 'Room not found');
         return;
       }
       
+      // Check the current players in the room
+      console.log(`Room ${roomCode} current players:`, room.players);
+      
+      // Check if the room is full (has 2 players)
       if (room.players.length >= 2) {
+        // Check if this player is already in the room
+        const isPlayerInRoom = room.players.some(p => p.id === socket.id);
+        if (isPlayerInRoom) {
+          console.log(`Player ${socket.id} is already in room ${roomCode}`);
+          
+          // Re-send the game_start event to restore the connection
+          const playerInfo = room.players.find(p => p.id === socket.id);
+          if (playerInfo) {
+            socket.join(roomCode);
+            socket.emit('game_start', {
+              roomCode,
+              isPlayerX: playerInfo.symbol === 'X',
+              playerSymbol: playerInfo.symbol,
+              currentTurn: room.currentTurn,
+              players: room.players
+            });
+            return;
+          }
+        }
+        
+        // Check if there are any disconnected players we can replace
+        const inactivePlayerIndex = room.players.findIndex(p => {
+          const playerSocket = io.sockets.sockets.get(p.id);
+          return !playerSocket || !playerSocket.connected;
+        });
+        
+        if (inactivePlayerIndex !== -1) {
+          // Replace the inactive player
+          const replacedPlayer = room.players[inactivePlayerIndex];
+          console.log(`Replacing inactive player ${replacedPlayer.id} with ${socket.id} in room ${roomCode}`);
+          
+          room.players[inactivePlayerIndex] = { 
+            id: socket.id, 
+            symbol: replacedPlayer.symbol 
+          };
+          
+          socket.join(roomCode);
+          playerToRoom.set(socket.id, roomCode);
+          
+          socket.emit('game_start', {
+            roomCode,
+            isPlayerX: replacedPlayer.symbol === 'X',
+            playerSymbol: replacedPlayer.symbol,
+            currentTurn: room.currentTurn,
+            players: room.players
+          });
+          
+          return;
+        }
+        
+        console.error(`Room ${roomCode} is full`);
         socket.emit('error', 'Room is full');
         return;
       }
       
       // Add the player to the room
-      room.players.push({ id: socket.id, symbol: 'O' });
+      const playerSymbol = room.players[0].symbol === 'X' ? 'O' : 'X';
+      room.players.push({ id: socket.id, symbol: playerSymbol });
+      
       socket.join(roomCode);
-      // Track this player's room
       playerToRoom.set(socket.id, roomCode);
       
       // Notify both players that the game is starting
       io.to(roomCode).emit('game_start', {
         roomCode,
-        isPlayerX: false,
-        players: room.players.map(p => ({ id: p.id, symbol: p.symbol })),
-        currentTurn: room.currentTurn
+        currentTurn: 'X',
+        players: room.players.map(p => ({ id: p.id, symbol: p.symbol }))
       });
       
-      console.log(`Player ${socket.id} joined room ${roomCode}`);
+      // Send individual player data
+      for (const player of room.players) {
+        const playerSocket = io.sockets.sockets.get(player.id);
+        if (playerSocket) {
+          playerSocket.emit('game_start', {
+            roomCode,
+            isPlayerX: player.symbol === 'X',
+            playerSymbol: player.symbol,
+            currentTurn: 'X',
+            players: room.players
+          });
+        }
+      }
+      
+      console.log(`Player ${socket.id} joined room ${roomCode} as ${playerSymbol}`);
     } catch (error) {
       console.error('Error joining room:', error);
       socket.emit('error', 'Failed to join room');
@@ -295,13 +367,43 @@ io.on('connection', (socket) => {
   // Find a random match
   socket.on('find_random_match', () => {
     try {
-      if (waitingPlayers.includes(socket.id)) return;
+      console.log(`Player ${socket.id} is looking for a random match`);
       
+      // If the player is already in the waiting list, don't add them again
+      if (waitingPlayers.includes(socket.id)) {
+        console.log(`Player ${socket.id} is already in the waiting list`);
+        socket.emit('waiting_for_match');
+        return;
+      }
+      
+      // Remove disconnected players from the waiting list
+      const connectedWaitingPlayers = waitingPlayers.filter(id => {
+        const playerSocket = io.sockets.sockets.get(id);
+        return playerSocket && playerSocket.connected;
+      });
+      
+      // Update the waiting list with only connected players
+      waitingPlayers.length = 0;
+      waitingPlayers.push(...connectedWaitingPlayers);
+      
+      // If there are other players waiting, match with one of them
       if (waitingPlayers.length > 0) {
         const opponentId = waitingPlayers.shift();
-        const roomCode = nanoid(6).toUpperCase();
+        const opponentSocket = io.sockets.sockets.get(opponentId);
         
-        // Create the room with players and their symbols
+        // If the opponent socket no longer exists, try again
+        if (!opponentSocket || !opponentSocket.connected) {
+          console.log(`Opponent ${opponentId} is disconnected, searching for another opponent`);
+          waitingPlayers.push(socket.id);
+          socket.emit('waiting_for_match');
+          return;
+        }
+        
+        // Create a room for the match
+        const roomCode = nanoid(6).toUpperCase();
+        console.log(`Creating random match room ${roomCode} between ${socket.id} and ${opponentId}`);
+        
+        // Create the room
         rooms.set(roomCode, {
           players: [
             { id: opponentId, symbol: 'X' },
@@ -309,49 +411,47 @@ io.on('connection', (socket) => {
           ],
           currentTurn: 'X',
           board: Array(9).fill(null),
-          lastMoveTime: Date.now() // Track when the last move was made
+          lastMoveTime: Date.now()
         });
         
+        // Join both players to the room
         socket.join(roomCode);
         playerToRoom.set(socket.id, roomCode);
         
-        // Get the opponent's socket
-        const opponentSocket = io.sockets.sockets.get(opponentId);
-        if (opponentSocket) {
-          opponentSocket.join(roomCode);
-          playerToRoom.set(opponentId, roomCode);
-        }
+        opponentSocket.join(roomCode);
+        playerToRoom.set(opponentId, roomCode);
         
-        // Send different game start data to each player
+        // Send game start data to both players
+        console.log(`Sending game_start to player ${socket.id} as O`);
         socket.emit('game_start', {
           roomCode,
-          isPlayerX: false, // This player is O
+          isPlayerX: false,
+          playerSymbol: 'O',
+          currentTurn: 'X',
           players: [
             { id: opponentId, symbol: 'X' },
             { id: socket.id, symbol: 'O' }
-          ],
-          playerSymbol: 'O', // Explicitly tell this player their symbol
-          currentTurn: 'X'
+          ]
         });
         
-        if (opponentSocket) {
-          opponentSocket.emit('game_start', {
-            roomCode,
-            isPlayerX: true, // Opponent is X
-            players: [
-              { id: opponentId, symbol: 'X' },
-              { id: socket.id, symbol: 'O' }
-            ],
-            playerSymbol: 'X', // Explicitly tell the opponent their symbol
-            currentTurn: 'X'
-          });
-        }
+        console.log(`Sending game_start to player ${opponentId} as X`);
+        opponentSocket.emit('game_start', {
+          roomCode,
+          isPlayerX: true,
+          playerSymbol: 'X',
+          currentTurn: 'X',
+          players: [
+            { id: opponentId, symbol: 'X' },
+            { id: socket.id, symbol: 'O' }
+          ]
+        });
         
         console.log(`Random match created: ${roomCode} - ${opponentId}(X) vs ${socket.id}(O)`);
       } else {
+        // Add this player to the waiting list
         waitingPlayers.push(socket.id);
+        console.log(`Player ${socket.id} added to waiting list. Current list:`, waitingPlayers);
         socket.emit('waiting_for_match');
-        console.log(`Player ${socket.id} is waiting for a match`);
       }
     } catch (error) {
       console.error('Error in random match:', error);

@@ -36,14 +36,23 @@ export const RandomMatchModal = memo(({ onMatchFound, onClose }: RandomMatchModa
 
   useEffect(() => {
     // Listen for match found event
-    socket.on('match_found', handleMatchFound);
+    socket.on('game_start', handleMatchFound);
     
     // Listen for waiting status
     socket.on('waiting_for_match', handleWaiting);
     
+    // Listen for error messages
+    socket.on('error', (errorMsg: string) => {
+      console.error("Error in random matchmaking:", errorMsg);
+      setIsSearching(false);
+      // Tell the user about the error
+      alert(`Matchmaking error: ${errorMsg}`);
+    });
+    
     return () => {
-      socket.off('match_found', handleMatchFound);
+      socket.off('game_start', handleMatchFound);
       socket.off('waiting_for_match', handleWaiting);
+      socket.off('error');
     };
   }, [handleMatchFound, handleWaiting]);
   
