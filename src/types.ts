@@ -66,6 +66,9 @@ export interface GameState {
   fadingSymbols?: number[];
   // Game result for online mode
   gameResult?: Player | 'draw' | null;
+  // For online play
+  players?: { id: string; symbol: Player }[];
+  status?: 'waiting' | 'playing' | 'ended';
 }
 
 export interface GameSettings {

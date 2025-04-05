@@ -11,7 +11,7 @@ let currentSoundPack: SoundPack = 'arcade';
 // Initialize Audio context
 const initAudioContext = () => {
   if (!audioContext) {
-    try {
+  try {
       audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
       console.log('Audio context initialized');
       return audioContext;
@@ -366,8 +366,8 @@ const createOscillator = (
   gainNode.connect(audioContext.destination);
   
   // Start oscillator with delay
-  const startTime = audioContext.currentTime + delay;
-  oscillator.start(startTime);
+    const startTime = audioContext.currentTime + delay;
+    oscillator.start(startTime);
   oscillator.stop(startTime + duration);
   
   // Store for cleanup

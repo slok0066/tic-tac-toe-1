@@ -1,7 +1,8 @@
-import { useState, useCallback, memo } from 'react';
+import { useState, useCallback, memo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { X, Copy, Sparkles, Check } from 'lucide-react';
 import { createRoom, joinRoom } from '../utils/socket';
+import socket from '../utils/socket';
 
 interface RoomModalProps {
   onCreateRoom: (roomCode: string) => void;
@@ -17,6 +18,21 @@ export const RoomModal = memo(({ onCreateRoom, onJoinRoom, onClose }: RoomModalP
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Add useEffect to listen for socket errors
+  useEffect(() => {
+    const handleSocketError = (errorMsg: string) => {
+      console.error('Socket error:', errorMsg);
+      setError(errorMsg || 'Connection error. Please try again.');
+      setIsLoading(false);
+    };
+    
+    socket.on('error', handleSocketError);
+    
+    return () => {
+      socket.off('error', handleSocketError);
+    };
+  }, []);
 
   const handleCreateRoom = useCallback(async () => {
     setIsLoading(true);
@@ -36,6 +52,7 @@ export const RoomModal = memo(({ onCreateRoom, onJoinRoom, onClose }: RoomModalP
     }
   }, [onCreateRoom]);
 
+  // Enhanced join room function
   const handleJoinRoom = useCallback(() => {
     if (!roomCode || roomCode.length < 6) {
       setError('Please enter a valid room code');
@@ -43,8 +60,24 @@ export const RoomModal = memo(({ onCreateRoom, onJoinRoom, onClose }: RoomModalP
     }
     
     setError(null);
+    setIsLoading(true);
+    
+    // Set a timeout to handle cases where the server doesn't respond
+    const timeout = setTimeout(() => {
+      setError('Connection timeout. Server might be unavailable.');
+      setIsLoading(false);
+    }, 10000);
+    
+    // Listen for game_start event
+    const handleGameStart = () => {
+      clearTimeout(timeout);
+      setIsLoading(false);
+      onJoinRoom(roomCode);
+    };
+    
+    socket.once('game_start', handleGameStart);
+    
     joinRoom(roomCode);
-    onJoinRoom(roomCode);
   }, [roomCode, onJoinRoom]);
 
   const copyToClipboard = useCallback(() => {
@@ -214,14 +247,23 @@ export const RoomModal = memo(({ onCreateRoom, onJoinRoom, onClose }: RoomModalP
             <button
               className="px-4 py-2 bg-gray-200 rounded-lg text-gray-700 font-medium hover:bg-gray-300"
               onClick={setModeMenu}
+              disabled={isLoading}
             >
               Back
             </button>
             <button
               className="px-6 py-2 bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg text-white font-medium hover:from-blue-600 hover:to-blue-700"
               onClick={handleJoinRoom}
+              disabled={isLoading}
             >
-              Join
+              {isLoading ? (
+                <div className="flex items-center">
+                  <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></div>
+                  <span>Joining...</span>
+                </div>
+              ) : (
+                "Join"
+              )}
             </button>
           </div>
         </motion.div>
