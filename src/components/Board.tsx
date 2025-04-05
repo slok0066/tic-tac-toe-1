@@ -14,6 +14,7 @@ interface BoardProps {
   theme: Theme;
   settings: GameSettings;
   fadingSymbols?: number[]; // Added for Infinity mode
+  animationSpeed?: 'slow' | 'medium' | 'fast'; // Added for direct animation control
 }
 
 // Memoize the board component to prevent unnecessary re-renders
@@ -26,13 +27,17 @@ export const Board = memo(({
   winner,
   theme,
   settings,
-  fadingSymbols = [] // Default to empty array
+  fadingSymbols = [], // Default to empty array
+  animationSpeed
 }: BoardProps) => {
   const xColor = getThemeClasses(theme, 'xColor');
   const oColor = getThemeClasses(theme, 'oColor');
   const boardBg = settings.darkMode ? 'bg-gray-700' : getThemeClasses(theme, 'boardBg');
   const boardStyleClasses = getBoardStyleClasses(settings.boardStyle, settings.darkMode);
   const symbols = SYMBOL_OPTIONS[settings.symbolStyle];
+  
+  // Use animationSpeed from props or fall back to settings
+  const effectiveAnimationSpeed = animationSpeed || settings.animationSpeed;
   
   // Check if we're likely on a low-end device
   const isLowEndDevice = window.navigator.hardwareConcurrency 
@@ -47,7 +52,7 @@ export const Board = memo(({
   const getAnimationDuration = () => {
     if (isLowEndDevice) return 0.2; // Always fast on low-end devices
     
-    switch (settings.animationSpeed) {
+    switch (effectiveAnimationSpeed) {
       case 'slow': return 0.8;
       case 'fast': return 0.3;
       default: return 0.5;
@@ -171,8 +176,8 @@ export const Board = memo(({
               layout
               transition={{ 
                 type: isLowEndDevice ? "tween" : "spring", 
-                stiffness: settings.animationSpeed === 'fast' ? 600 : 
-                           settings.animationSpeed === 'medium' ? 500 : 400, 
+                stiffness: effectiveAnimationSpeed === 'fast' ? 600 : 
+                           effectiveAnimationSpeed === 'medium' ? 500 : 400, 
                 damping: 30 
               }}
             >
@@ -228,8 +233,8 @@ export const Board = memo(({
                   transition={{ 
                     repeat: Infinity, 
                     repeatType: "loop", 
-                    duration: settings.animationSpeed === 'slow' ? 3 : 
-                               settings.animationSpeed === 'medium' ? 2 : 1.5, 
+                    duration: effectiveAnimationSpeed === 'slow' ? 3 : 
+                               effectiveAnimationSpeed === 'medium' ? 2 : 1.5, 
                     ease: "easeInOut" 
                   }}
                 >
@@ -322,8 +327,8 @@ export const Board = memo(({
                     }`}
                     animate={showAnimations && !isLowEndDevice ? { scale: [1, 1.05, 1] } : { scale: 1 }}
                     transition={{ 
-                      duration: settings.animationSpeed === 'slow' ? 2 : 
-                                 settings.animationSpeed === 'medium' ? 1.5 : 1, 
+                      duration: effectiveAnimationSpeed === 'slow' ? 2 : 
+                                 effectiveAnimationSpeed === 'medium' ? 1.5 : 1, 
                       repeat: Infinity, 
                       repeatType: "loop" 
                     }}
@@ -354,8 +359,8 @@ export const Board = memo(({
                       y: [0, -5, 0] 
                     } : { scale: 1 }}
                     transition={{ 
-                      duration: settings.animationSpeed === 'slow' ? 2 : 
-                                 settings.animationSpeed === 'medium' ? 1.5 : 1, 
+                      duration: effectiveAnimationSpeed === 'slow' ? 2 : 
+                                 effectiveAnimationSpeed === 'medium' ? 1.5 : 1, 
                       repeat: Infinity, 
                       repeatType: "loop" 
                     }}
@@ -399,8 +404,8 @@ export const Board = memo(({
             initial={{ pathLength: 0 }}
             animate={{ pathLength: 1 }}
             transition={{ 
-              duration: settings.animationSpeed === 'slow' ? 1 : 
-                         settings.animationSpeed === 'medium' ? 0.7 : 0.5, 
+              duration: effectiveAnimationSpeed === 'slow' ? 1 : 
+                         effectiveAnimationSpeed === 'medium' ? 0.7 : 0.5, 
               ease: "easeInOut"
             }}
             x1={getLineCoordinates(winningLine)?.x1}

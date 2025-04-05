@@ -27,27 +27,45 @@ export const RoomModal = memo(({ onCreateRoom, onJoinRoom, onClose }: RoomModalP
       setIsLoading(false);
     };
     
+    const handleRoomCreated = (data: { roomCode: string }) => {
+      console.log('Room created event with code:', data.roomCode);
+      setCreatedRoomCode(data.roomCode);
+      setMode('create');
+      setIsLoading(false);
+      
+      // Notify the parent component
+      onCreateRoom(data.roomCode);
+    };
+    
     socket.on('error', handleSocketError);
+    socket.on('room_created', handleRoomCreated);
     
     return () => {
       socket.off('error', handleSocketError);
+      socket.off('room_created', handleRoomCreated);
     };
   }, []);
 
-  const handleCreateRoom = useCallback(async () => {
+  const handleCreateRoom = useCallback(() => {
     setIsLoading(true);
     setError(null);
     try {
-      // Generate a random code if needed
-      const code = await createRoom();
-      console.log('Created room with code:', code);
-      setCreatedRoomCode(code);
+      // Generate a room code directly
+      const randomCode = Array(6).fill(0)
+        .map(() => String.fromCharCode(65 + Math.floor(Math.random() * 26)))
+        .join('');
+      
+      console.log('Created room with code:', randomCode);
+      setCreatedRoomCode(randomCode);
       setMode('create');
-      onCreateRoom(code);
+      setIsLoading(false);
+      
+      // Send the room creation request to the server and notify parent
+      createRoom(randomCode);
+      onCreateRoom(randomCode);
     } catch (err) {
       console.error('Room creation error:', err);
       setError('Failed to create room. Please try again.');
-    } finally {
       setIsLoading(false);
     }
   }, [onCreateRoom]);
@@ -62,22 +80,15 @@ export const RoomModal = memo(({ onCreateRoom, onJoinRoom, onClose }: RoomModalP
     setError(null);
     setIsLoading(true);
     
-    // Set a timeout to handle cases where the server doesn't respond
-    const timeout = setTimeout(() => {
-      setError('Connection timeout. Server might be unavailable.');
-      setIsLoading(false);
-    }, 10000);
-    
-    // Listen for game_start event
-    const handleGameStart = () => {
-      clearTimeout(timeout);
-      setIsLoading(false);
+    try {
+      // Send join room request and notify parent immediately
+      joinRoom(roomCode);
       onJoinRoom(roomCode);
-    };
-    
-    socket.once('game_start', handleGameStart);
-    
-    joinRoom(roomCode);
+    } catch (err) {
+      console.error('Room join error:', err);
+      setError('Failed to join room. Please try again.');
+      setIsLoading(false);
+    }
   }, [roomCode, onJoinRoom]);
 
   const copyToClipboard = useCallback(() => {

@@ -1,88 +1,41 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import socket from '../utils/socket';
-import { GameState } from '../types';
 import '../styles/RandomMatchModal.css';
 
 interface RandomMatchModalProps {
   onClose: () => void;
-  onGameStart: (gameState: GameState) => void;
 }
 
-const RandomMatchModal = ({ onClose, onGameStart }: RandomMatchModalProps) => {
-  const [isSearching, setIsSearching] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
+const RandomMatchModal = ({ onClose }: RandomMatchModalProps) => {
   useEffect(() => {
-    const handleWaitingForMatch = () => {
-      setIsSearching(true);
-    };
-
-    const handleGameStart = (gameState: GameState) => {
-      console.log('Random match found:', gameState);
-      onGameStart(gameState);
-    };
-    
-    const handleError = (errorMsg: string) => {
-      setError(errorMsg);
-      setIsSearching(false);
-    };
-
-    // Set up event listeners
-    socket.on('waiting_for_match', handleWaitingForMatch);
-    socket.on('game_start', handleGameStart);
-    socket.on('error', handleError);
-
-    return () => {
-      // Clean up event listeners
-      socket.off('waiting_for_match', handleWaitingForMatch);
-      socket.off('game_start', handleGameStart);
-      socket.off('error', handleError);
-      
-      // Cancel matchmaking if the modal is closed while searching
-      if (isSearching) {
-        socket.emit('cancel_random_match');
-      }
-    };
-  }, [onGameStart, isSearching]);
-
-  const handleFindMatch = () => {
-    setError(null);
+    // Immediately request a random match when the component mounts
+    console.log("Requesting random match");
     socket.emit('random_match');
-  };
+    
+    return () => {
+      // Clean up on unmount - cancel matchmaking if the modal is closed
+      console.log("Cancelling random match");
+      socket.emit('cancel_random_match');
+    };
+  }, []);
 
   const handleCancel = () => {
-    if (isSearching) {
-      socket.emit('cancel_random_match');
-    }
-    setIsSearching(false);
+    socket.emit('cancel_random_match');
     onClose();
   };
 
   return (
     <div className="random-match-modal">
       <div className="modal-content">
-        <h2>Random Matchmaking</h2>
+        <h2>Finding Opponent...</h2>
         
-        {error && <div className="error-message">{error}</div>}
-        
-        {!isSearching ? (
-          <div className="modal-actions">
-            <button onClick={handleFindMatch} className="find-match-btn">
-              Find Match
-            </button>
-            <button onClick={handleCancel} className="cancel-btn">
-              Cancel
-            </button>
-          </div>
-        ) : (
-          <div className="searching-container">
-            <div className="spinner"></div>
-            <p>Looking for an opponent...</p>
-            <button onClick={handleCancel} className="cancel-btn">
-              Cancel
-            </button>
-          </div>
-        )}
+        <div className="searching-container">
+          <div className="spinner"></div>
+          <p>Looking for an opponent...</p>
+          <button onClick={handleCancel} className="cancel-btn">
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
   );

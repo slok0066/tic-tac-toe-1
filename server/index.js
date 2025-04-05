@@ -149,63 +149,64 @@ io.on('connection', (socket) => {
     }
   });
   
-  // Join an existing room
+  // Join a room
   socket.on('join_room', (data) => {
     try {
-      console.log(`Player ${socket.id} attempting to join room:`, data);
-      const roomCode = data?.roomCode;
+      const { roomCode } = data;
+      console.log(`Player ${socket.id} attempting to join room: ${roomCode}`);
       
       if (!roomCode) {
         socket.emit('error', 'Room code is required');
         return;
       }
       
-      const room = rooms.get(roomCode);
-      
-      if (!room) {
+      // Check if the room exists
+      if (!rooms.has(roomCode)) {
         socket.emit('error', 'Room not found');
         return;
       }
       
+      const room = rooms.get(roomCode);
+      
+      // Check if the room is already full (2 players max)
       if (room.players.length >= 2) {
-        console.log(`Room ${roomCode} is full, players:`, room.players);
         socket.emit('error', 'Room is full');
         return;
       }
       
+      // First player is always X, so joining player is O
+      const joiningPlayerSymbol = 'O';
+      const existingPlayer = room.players[0];
+      
       // Add the player to the room
-      room.players.push({ id: socket.id, symbol: 'O' });
+      room.players.push({ id: socket.id, symbol: joiningPlayerSymbol });
       socket.join(roomCode);
-      // Track this player's room
       playerToRoom.set(socket.id, roomCode);
       
-      console.log(`Player ${socket.id} joined room ${roomCode}`);
-      
-      // Find the X player (creator of the room)
-      const xPlayer = room.players.find(p => p.symbol === 'X');
-      
-      // Notify the joining player (O)
+      // Notify the joining player they're in the game
       socket.emit('game_start', {
         roomCode,
         isPlayerX: false,
-        playerSymbol: 'O',
+        playerSymbol: joiningPlayerSymbol,
         players: room.players,
-        currentTurn: room.currentTurn
+        currentTurn: room.currentTurn,
+        status: 'playing'
       });
       
-      // Notify the other player (X) that someone joined
-      if (xPlayer) {
-        const xPlayerSocket = io.sockets.sockets.get(xPlayer.id);
-        if (xPlayerSocket) {
-          xPlayerSocket.emit('game_start', {
-            roomCode,
-            isPlayerX: true,
-            playerSymbol: 'X',
-            players: room.players,
-            currentTurn: room.currentTurn
-          });
-        }
+      // Notify the existing player that someone joined
+      const existingSocket = io.sockets.sockets.get(existingPlayer.id);
+      if (existingSocket) {
+        existingSocket.emit('game_start', {
+          roomCode,
+          isPlayerX: true,
+          playerSymbol: existingPlayer.symbol,
+          players: room.players,
+          currentTurn: room.currentTurn,
+          status: 'playing'
+        });
       }
+      
+      console.log(`Player ${socket.id} joined room: ${roomCode}`);
     } catch (error) {
       console.error('Error joining room:', error);
       socket.emit('error', 'Failed to join room');
@@ -341,6 +342,7 @@ io.on('connection', (socket) => {
           ],
           currentTurn: 'X',
           board: Array(9).fill(null),
+          lastMoveTime: Date.now()
         });
         
         // Add both players to the room
@@ -358,7 +360,8 @@ io.on('connection', (socket) => {
               { id: waitingPlayer, symbol: 'X' },
               { id: socket.id, symbol: 'O' }
             ],
-            currentTurn: 'X'
+            currentTurn: 'X',
+            status: 'playing'
           });
         }
         
@@ -374,7 +377,8 @@ io.on('connection', (socket) => {
             { id: waitingPlayer, symbol: 'X' },
             { id: socket.id, symbol: 'O' }
           ],
-          currentTurn: 'X'
+          currentTurn: 'X',
+          status: 'playing'
         });
         
         // Clear the waiting player
@@ -423,6 +427,21 @@ io.on('connection', (socket) => {
       }
     } catch (error) {
       console.error('Error handling disconnect:', error);
+    }
+  });
+
+  // Cancel random match finding
+  socket.on('cancel_random_match', () => {
+    try {
+      console.log(`Player ${socket.id} canceling random match`);
+      
+      // If this player is the waiting player, clear it
+      if (waitingPlayer === socket.id) {
+        waitingPlayer = null;
+        console.log(`Cleared waiting player ${socket.id}`);
+      }
+    } catch (error) {
+      console.error('Error canceling random match:', error);
     }
   });
 });

@@ -279,31 +279,42 @@ function App() {
         const handleGameStart = (data: any) => {
           console.log("Game start event received:", data);
           
-          // Check if we're waiting to join or create a game
-          if (
-            (pendingGameMode === 'online' && (showRoomModal || gameState.roomStatus === 'waiting' || gameState.roomStatus === 'joining')) ||
-            (pendingGameMode === 'random' && showRandomMatchModal)
-          ) {
-            const mode = pendingGameMode as GameMode;
-            
-            // Start the game with the received information
-            startGame(mode, {
+          // Determine if this is a waiting event or actual game start
+          const isWaiting = data.status === 'waiting';
+          
+          if (isWaiting) {
+            console.log("Waiting for opponent to join");
+            // Start game in waiting mode
+            startGame('online', {
               roomCode: data.roomCode,
-              playerSymbol: data.playerSymbol || (data.isPlayerX ? 'X' : 'O'),
+              playerSymbol: data.playerSymbol,
+              roomStatus: 'waiting',
+              gameType: selectedGameType
+            });
+          } else {
+            // Determine the game mode
+            const mode = pendingGameMode === 'random' ? 'random' : 'online';
+            
+            // Close any modals that might be open
+            setShowRoomModal(false);
+            setShowRandomMatchModal(false);
+            
+            // Start game with the received information
+            startGame(mode as GameMode, {
+              roomCode: data.roomCode,
+              playerSymbol: data.playerSymbol,
               roomStatus: 'playing',
               gameType: selectedGameType
             });
-            
-            // Close any modal that might be open
-            setShowRoomModal(false);
-            setShowRandomMatchModal(false);
-            setPendingGameMode(null);
             
             // Play sound to indicate game has started
             if (settings.soundEnabled) {
               playClickSound();
             }
           }
+          
+          // Reset pending mode
+          setPendingGameMode(null);
         };
 
         socket.on('move_made', handleOpponentMove);
@@ -685,39 +696,43 @@ function App() {
     }
     
     // Handle online game by sending move to server
-    if (gameMode === 'online') {
+    if (gameMode === 'online' || gameMode === 'random') {
       const moveData = {
         position: index,
-        symbol: gameState.playerSymbol,
-        board: [...gameState.board]
+        symbol: gameState.playerSymbol
       };
       
-      socket.emit('make_move', moveData);
+      // Only send the move if it's our turn
+      if (gameState.currentPlayer === gameState.playerSymbol) {
+        console.log('Sending move to server:', moveData);
+        socket.emit('make_move', moveData);
+      } else {
+        console.log('Not your turn');
+      }
     }
   };
 
-  const handleGameTypeSelect = (gameType: GameType) => {
-    setSelectedGameType(gameType);
+  const handleGameTypeSelect = (type: GameType) => {
+    setSelectedGameType(type);
+    
+    // Close the game type modal
     setShowGameTypeModal(false);
     
-    // Reset the game with the new game type
-    setGameState(prev => ({
-      ...initialGameState,
-      theme: settings.theme,
-      gameType
-    }));
+    if (settings.soundEnabled) {
+      playClickSound();
+    }
     
-    // Show appropriate modal based on the game mode
-    const mode = pendingGameMode as GameMode;
-    if (mode === 'ai') {
-      setShowDifficultyModal(true);
-    } else if (mode === 'online') {
-      setShowRoomModal(true);
-    } else if (mode === 'random') {
+    if (pendingGameMode === 'random') {
+      // For random mode, directly find a match
+      socket.emit('random_match');
       setShowRandomMatchModal(true);
+    } else if (pendingGameMode === 'online') {
+      // For online mode, show the room modal
+      setShowRoomModal(true);
     } else {
-      // For friend mode, start directly
-      startGame(mode, { gameType });
+      // Start game for local modes
+      startGame(pendingGameMode as GameMode, { gameType: type });
+      setPendingGameMode(null);
     }
   };
     
@@ -851,24 +866,26 @@ function App() {
   };
 
   const handleCreateRoom = (roomCode: string) => {
-    playClickSound();
-    socket.emit('create_room', { roomCode });
-    startGame(pendingGameMode as GameMode, { 
-      roomCode, 
+    console.log("Room created with code:", roomCode);
+    // Set game mode and start game immediately
+    startGame('online', {
+      roomCode,
+      playerSymbol: 'X',
       roomStatus: 'waiting',
-      playerSymbol: 'X' 
+      gameType: selectedGameType
     });
     setShowRoomModal(false);
     setPendingGameMode(null);
   };
 
   const handleJoinRoom = (roomCode: string) => {
-    playClickSound();
-    socket.emit('join_room', { roomCode });
-    startGame(pendingGameMode as GameMode, { 
-      roomCode, 
+    console.log("Joining room with code:", roomCode);
+    // Set game mode and start game immediately
+    startGame('online', {
+      roomCode,
+      playerSymbol: 'O',
       roomStatus: 'joining',
-      playerSymbol: 'O' 
+      gameType: selectedGameType
     });
     setShowRoomModal(false);
     setPendingGameMode(null);
@@ -880,18 +897,12 @@ function App() {
       playClickSound();
     }
     
+    // Set the game to random mode and show the searching modal
     setPendingGameMode('random');
+    setSelectedGameType('normal');
     setShowRandomMatchModal(true);
-  };
-
-  const handleGameStartFromRandomMatch = (gameState: GameState) => {
-    startGame('random', {
-      roomCode: gameState.roomCode,
-      playerSymbol: gameState.playerSymbol,
-      roomStatus: 'playing',
-      gameType: selectedGameType
-    });
-    setShowRandomMatchModal(false);
+    
+    // Game will be started when we get the game_start event from server
   };
 
   const handleSaveSettings = (newSettings: GameSettings) => {
@@ -1324,7 +1335,6 @@ function App() {
             )}
             {showRandomMatchModal && (
               <RandomMatchModal
-                onGameStart={handleGameStartFromRandomMatch}
                 onClose={() => {
                   setShowRandomMatchModal(false);
                   setPendingGameMode(null);
