@@ -11,7 +11,7 @@ const getServerUrl = (): string => {
     
     if (isProd) {
       // In production, use the deployed server URL
-      serverUrl = "https://tic-tac-toe-1-3xvx.onrender.com";
+      serverUrl = "https://tic-tac-toe-1-1-loqk.onrender.com";
       console.log("Using production server URL:", serverUrl);
     } else {
       // In development, use localhost
@@ -23,7 +23,7 @@ const getServerUrl = (): string => {
   } catch (error) {
     console.error("Error determining server URL:", error);
     // Fallback to production URL if there's an error
-    return "https://tic-tac-toe-1-3xvx.onrender.com";
+    return "https://tic-tac-toe-1-1-loqk.onrender.com";
   }
 };
 
