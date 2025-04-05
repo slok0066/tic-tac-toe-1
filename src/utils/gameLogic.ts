@@ -278,3 +278,74 @@ export const getAIMove = (board: BoardState, difficulty: Difficulty, boardSize: 
   // Otherwise, choose random corner or side
   return availableMoves[Math.floor(Math.random() * availableMoves.length)];
 };
+
+// Add utility functions for theme and board classes
+export const getThemeClasses = (theme: string, type: string): string => {
+  const themes: Record<string, Record<string, string>> = {
+    blue: {
+      primary: 'from-blue-500 to-blue-600',
+      secondary: 'from-blue-400 to-blue-500',
+      bg: 'bg-gradient-to-br from-blue-100 to-blue-50',
+      gradient: 'from-blue-500 to-indigo-600',
+      accent: 'text-blue-500',
+      border: 'border-blue-500'
+    },
+    green: {
+      primary: 'from-green-500 to-green-600',
+      secondary: 'from-green-400 to-green-500',
+      bg: 'bg-gradient-to-br from-green-100 to-green-50',
+      gradient: 'from-green-500 to-teal-600',
+      accent: 'text-green-500',
+      border: 'border-green-500'
+    },
+    purple: {
+      primary: 'from-purple-500 to-purple-600',
+      secondary: 'from-purple-400 to-purple-500',
+      bg: 'bg-gradient-to-br from-purple-100 to-purple-50',
+      gradient: 'from-purple-500 to-pink-600',
+      accent: 'text-purple-500',
+      border: 'border-purple-500'
+    },
+    red: {
+      primary: 'from-red-500 to-red-600',
+      secondary: 'from-red-400 to-red-500',
+      bg: 'bg-gradient-to-br from-red-100 to-red-50',
+      gradient: 'from-red-500 to-orange-600',
+      accent: 'text-red-500',
+      border: 'border-red-500'
+    }
+  };
+
+  return themes[theme]?.[type] || themes.blue[type];
+};
+
+export const getBoardClasses = (boardStyle: string): string => {
+  const styles: Record<string, string> = {
+    classic: 'bg-white/90 dark:bg-gray-800/90 shadow-md',
+    glass: 'bg-white/40 dark:bg-gray-800/40 backdrop-blur shadow-lg border border-white/20 dark:border-gray-700/20',
+    solid: 'bg-white dark:bg-gray-800 shadow-xl',
+    neon: 'bg-gray-900/90 border-2 border-purple-500 shadow-[0_0_15px_rgba(168,85,247,0.5)]'
+  };
+
+  return styles[boardStyle] || styles.classic;
+};
+
+export const getBoardSizeFromType = (gameType: string): BoardSize => {
+  if (gameType === 'ultimate') return 'ultimate';
+  return '3x3'; // Default for normal and infinity modes
+};
+
+// Utility for debouncing function calls
+export const debounce = <F extends (...args: any[]) => any>(
+  func: F,
+  waitFor: number
+): ((...args: Parameters<F>) => void) => {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+
+  return (...args: Parameters<F>): void => {
+    if (timeout !== null) {
+      clearTimeout(timeout);
+    }
+    timeout = setTimeout(() => func(...args), waitFor);
+  };
+};

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense, lazy } from "react";
 import { motion, AnimatePresence } from 'framer-motion';
 import { Gamepad2, Users, Wifi, ArrowLeft, Globe, Settings as SettingsIcon } from 'lucide-react';
 import { Board } from './components/Board';
@@ -10,23 +10,21 @@ import { GameResultModal } from './components/GameResultModal';
 import { checkWinner, getAIMove } from './utils/gameLogic';
 import { GameState, GameMode, Player, Difficulty, RoomStatus, GameSettings, GameType, BoardSize, BoardState, MoveInfo } from './types';
 import socket from './utils/socket';
-import { getThemeClasses, applyTheme } from './utils/theme';
+import { initializeAudio, playMoveSound, playResultSound, playClickSound, setSoundEnabled } from './utils/sounds';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { 
-  initializeAudio, 
-  playMoveSound, 
-  playResultSound, 
-  playClickSound,
-  setSoundEnabled
-} from './utils/sounds';
-import { UltimateBoard } from './components/UltimateBoard';
-import { LargeBoard } from './components/LargeBoard';
-import { 
-  initializeUltimateBoard, 
+  getThemeClasses, 
+  debounce, 
+  getBoardClasses, 
+  getBoardSizeFromType, 
+  getBoardSizeFromLength,
+  initializeUltimateBoard,
   checkUltimateWinner, 
-  makeUltimateMove, 
-  getBoardSizeFromLength
+  makeUltimateMove
 } from './utils/gameLogic';
 import { TutorialPage } from './components/TutorialPage';
+import { UltimateBoard } from './components/UltimateBoard';
+import { LargeBoard } from './components/LargeBoard';
 
 const initialGameState: GameState = {
   board: Array(9).fill(null),
@@ -110,35 +108,41 @@ const GameTimer = ({ enabled, darkMode, startTime }: { enabled: boolean; darkMod
   );
 };
 
-// Add this error boundary component
-class ErrorBoundary extends React.Component<{ children: React.ReactNode, fallback: React.ReactNode }> {
-  state = { hasError: false, error: null };
-  
-  static getDerivedStateFromError(error: Error) {
-    return { hasError: true, error };
-  }
-  
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error("Error caught by boundary:", error, errorInfo);
-  }
-  
-  render() {
-    if (this.state.hasError) {
-      return this.props.fallback;
-    }
-    return this.props.children;
-  }
-}
+// Add a mobile detection utility
+const isMobileDevice = () => {
+  return (
+    typeof window !== 'undefined' && 
+    (window.innerWidth < 768 || 
+    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent))
+  );
+};
 
-// Check if we're likely on a low-end device
-const isLowEndDevice = window.navigator.hardwareConcurrency 
-  ? window.navigator.hardwareConcurrency <= 4
-  : true; // Assume low-end if we can't detect
+// Utility to detect low-end devices
+const isLowEndDevice = () => {
+  // Check hardware concurrency (number of CPU cores)
+  if (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) {
+    return true;
+  }
+  
+  // Check if device memory API is available
+  if ((navigator as any).deviceMemory && (navigator as any).deviceMemory <= 4) {
+    return true;
+  }
+  
+  // Check user agent for low-end device indicators
+  const ua = navigator.userAgent.toLowerCase();
+  if (ua.includes('android') && !ua.includes('chrome')) {
+    return true; // Non-Chrome Android is often low-end
+  }
+  
+  return false;
+};
 
-// Define these constants at the top of the App function, after the state variables
-// Style constants for consistent UI
-const gameModeButtonStyle = `flex flex-col items-center justify-center p-4 rounded-2xl space-y-3 transition-all hover:scale-105 cursor-pointer select-none touch-manipulation shadow-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-white`;
-const gameModeButtonActiveStyle = `ring-4 ring-offset-4 dark:ring-offset-gray-900 ring-blue-500 scale-105 bg-blue-50 dark:bg-blue-900`;
+// Define the lazy components with proper types
+const LazyBoard = lazy(() => Promise.resolve({ default: Board }));
+const LazyGameResultModal = lazy(() => Promise.resolve({ default: GameResultModal }));
+const LazySettingsModal = lazy(() => Promise.resolve({ default: SettingsModal }));
+const LazyTutorialPage = lazy(() => Promise.resolve({ default: TutorialPage }));
 
 function App() {
   const [gameMode, setGameMode] = useState<GameMode | null>(null);
@@ -154,12 +158,48 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [selectedGameType, setSelectedGameType] = useState<GameType>('normal');
   const [showTutorial, setShowTutorial] = useState(false);
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
   
   // For Ultimate Tic-Tac-Toe
   const [ultimateBoard, setUltimateBoard] = useState(initializeUltimateBoard());
 
   // Reduce the number of background elements for low-end devices
-  const bgElementCount = isLowEndDevice ? 2 : 5;
+  const bgElementCount = isLowEndDevice() ? 2 : 5;
+
+  // Add a state to track if we're on a mobile device
+  const [isMobile, setIsMobile] = useState(false);
+  
+  // Check for mobile device on mount
+  useEffect(() => {
+    setIsMobile(isMobileDevice());
+    
+    // Add resize listener to update mobile status
+    const handleResize = () => {
+      setIsMobile(isMobileDevice());
+    };
+    
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+  
+  // Update settings to reduce animations on mobile
+  useEffect(() => {
+    if (isMobile) {
+      setSettings(prev => ({
+        ...prev,
+        animationSpeed: 'fast',
+        confettiAmount: 'low'
+      }));
+    }
+  }, [isMobile]);
+  
+  // Create a loading fallback for lazy components
+  const LazyLoadingFallback = () => (
+    <div className="flex items-center justify-center w-full h-full min-h-[200px]">
+      <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+    </div>
+  );
 
   // Initialize socket connection and audio when app loads
   useEffect(() => {
@@ -194,140 +234,78 @@ function App() {
 
   // Subscribe to socket events for online play
   useEffect(() => {
-    if (gameMode === 'online') {
-      try {
-        // Handle incoming moves from opponent
-        const handleOpponentMove = (data: { position: number; symbol: string; board: any[]; currentTurn: string; moveHistory?: MoveInfo[]; fadingSymbols?: number[] }) => {
+    try {
+      if (gameMode === 'online' || gameMode === 'random') {
+        console.log("Setting up socket event listeners");
+
+        // Handle when opponent makes a move
+        const handleOpponentMove = (data: any) => {
+          console.log("Opponent made move", data);
           setGameState(prev => {
-            try {
-              const { position, symbol, board, currentTurn, moveHistory, fadingSymbols } = data;
-              
-              // Get board size based on the length of the board array
-              const boardSize = getBoardSizeFromLength(board.length);
-              const { winner, line } = checkWinner(board, boardSize);
-              
-              // Play move sound
-              playMoveSound(symbol as Player);
-              
-              // Remove confetti animation for wins
-              const showConfetti = false; // Always set to false to disable win animation
-              
-              if (winner) {
-                // Small delay to ensure sound plays after the move sound
-                setTimeout(() => {
-                  playResultSound(winner === 'draw' ? 'draw' : 'win');
-                }, 300);
-              }
-              
-              // Handle Infinity mode data if provided
-              const updatedMoveHistory = isInfinityMode() ? 
-                (moveHistory || prev.moveHistory || []) : undefined;
-                
-              const updatedFadingSymbols = isInfinityMode() ? 
-                (fadingSymbols || prev.fadingSymbols || []) : undefined;
-              
-              return {
-                ...prev,
-                board,
-                currentPlayer: currentTurn as Player,
-                winner,
-                winningLine: line,
-                showConfetti,
-                moveHistory: updatedMoveHistory,
-                fadingSymbols: updatedFadingSymbols
-              };
-            } catch (err) {
-              console.error("Error handling move:", err);
-              return prev;
-            }
-          });
-        };
-
-        // Handle game start event
-        const handleGameStart = (data: any) => {
-          try {
-            setGameState(prev => ({
-              ...prev,
-              roomStatus: 'playing',
-              playerSymbol: data.players.find((p: any) => p.id === (window as any).socket?.id)?.symbol || 'X',
-              currentPlayer: 'X' // Game always starts with X
-            }));
-          } catch (err) {
-            console.error("Error in handleGameStart:", err);
-            setError("Error starting game. Please try again.");
-          }
-        };
-
-        // Handle player leaving
-        const handlePlayerLeft = () => {
-          try {
-            setGameState(prev => ({
-              ...prev,
-              roomStatus: 'ended'
-            }));
-            alert("Your opponent has left the game.");
-          } catch (err) {
-            console.error("Error in handlePlayerLeft:", err);
-          }
-        };
-
-        // Handle connection errors
-        const handleConnectionError = (err: any) => {
-          console.error("Socket connection error:", err);
-          setError("Connection error. Please check your internet connection and try again.");
-        };
-
-        // Subscribe to opponent moves
-        socket.on('move_made', handleOpponentMove);
-        
-        // Handle game start event
-        socket.on('game_start', (data: { roomCode: string; isPlayerX: boolean }) => {
-          handleGameStart(data);
-        });
-        
-        // Handle player disconnection
-        socket.on('player_left', handlePlayerLeft);
-        
-        // In the socket event handlers part, update the game_over handler
-        socket.on('game_over', (data: { winner: Player | 'draw' }) => {
-          console.log('Game over received:', data);
-          
-          // Play result sound
-          if (settings.soundEnabled) {
-            playResultSound(data.winner === 'draw' ? 'draw' : 'win');
-          }
-          
-          setGameState(prev => {
-            // Use custom logic for online games, as we already know the winner from the server
-            const winner = data.winner;
-            let winningLine = null;
+            const newBoard = [...prev.board];
+            newBoard[data.position] = data.symbol;
             
-            // Only calculate winning line if there's a winner and not a draw
-            if (winner !== 'draw') {
-              const result = checkWinner(prev.board);
-              winningLine = result.line;
-            }
-            
+            // Properly determine the current player - it should be the player's symbol after opponent's move
+            const newCurrentPlayer: Player = prev.playerSymbol === 'X' ? 'X' : 'O';
+
             return {
-              ...prev, 
-              winner, 
-              winningLine, 
-              showConfetti: winner === prev.playerSymbol,
-              gameResult: winner
+              ...prev,
+              board: newBoard,
+              currentPlayer: newCurrentPlayer // Ensure this is typed as Player
             };
           });
+
+          // Play move sound
+          if (settings.soundEnabled) {
+            import('./utils/sounds').then(sounds => {
+              sounds.playMoveSound(data.symbol as Player);
+            });
+          }
+        };
+
+        // When a player leaves the room
+        const handlePlayerLeft = () => {
+          setGameState(prev => ({
+            ...prev,
+            roomStatus: 'ended'
+          }));
+
+          // Show notification
+          setToastMessage("Opponent left the game");
+          setShowToast(true);
+        };
+
+        socket.on('move_made', handleOpponentMove);
+        
+        socket.on('game_start', (data: any) => {
+          console.log("Game started with data:", data);
+          // Set initial game state based on received data
+          setGameState(prev => ({
+            ...prev,
+            roomCode: data.roomCode,
+            playerSymbol: data.playerSymbol || data.isPlayerX ? 'X' : 'O',
+            roomStatus: 'playing',
+            currentPlayer: 'X' // X always goes first
+          }));
         });
         
+        socket.on('player_left', handlePlayerLeft);
+        
+        socket.on('error', (error: string) => {
+          console.error("Socket error:", error);
+          setError(error);
+        });
+
         return () => {
-          // Clean up socket listeners
-          socket.off('move_made');
+          // Clean up socket listeners when unmounting
+          socket.off('move_made', handleOpponentMove);
           socket.off('game_start');
-          socket.off('player_left');
+          socket.off('player_left', handlePlayerLeft);
+          socket.off('error');
         };
-      } catch (err) {
-        console.error("Failed to subscribe to socket events:", err);
-        setError("Connection to game server failed. Please try again.");
       }
+    } catch (err) {
+      console.error("Failed to subscribe to socket events:", err);
     }
   }, [gameMode]);
 
@@ -691,16 +669,11 @@ function App() {
     if (gameMode === 'online') {
       const moveData = {
         position: index,
-        roomCode: gameState.roomCode,
-        player: gameState.playerSymbol,
-        // Include infinity mode data if needed
-        ...(isInfinityMode() ? {
-          moveHistory: gameState.moveHistory,
-          fadingSymbols: gameState.fadingSymbols 
-        } : {})
+        symbol: gameState.playerSymbol,
+        board: [...gameState.board]
       };
       
-      socket.emit('makeMove', moveData);
+      socket.emit('make_move', moveData);
     }
   };
 
@@ -1053,7 +1026,9 @@ function App() {
           </div>
         }
       >
-        <TutorialPage onClose={() => setShowTutorial(false)} darkMode={settings.darkMode} />
+        <Suspense fallback={<LazyLoadingFallback />}>
+          <LazyTutorialPage onClose={() => setShowTutorial(false)} darkMode={settings.darkMode} />
+        </Suspense>
       </ErrorBoundary>
     );
   }
@@ -1112,7 +1087,7 @@ function App() {
                   y: `${Math.random() * 100}vh`,
                   scale: Math.random() * 0.5 + 0.5,
                 }}
-                animate={settings.showAnimations && !isLowEndDevice ? {
+                animate={settings.showAnimations && !isLowEndDevice() ? {
                   y: [`${Math.random() * 100}vh`, `${Math.random() * 100}vh`],
                   x: [`${Math.random() * 100}vw`, `${Math.random() * 100}vw`],
                 } : {}}
@@ -1131,7 +1106,7 @@ function App() {
           </div>
           
           <motion.div
-            initial={{ opacity: 0, y: isLowEndDevice ? 10 : 20 }}
+            initial={{ opacity: 0, y: isLowEndDevice() ? 10 : 20 }}
             animate={{ opacity: 1, y: 0 }}
             className={`${contentBgClass} backdrop-blur-md p-8 rounded-2xl shadow-2xl border border-white/50 relative`}
             transition={{ 
@@ -1155,11 +1130,11 @@ function App() {
               initial={{ scale: 0.9 }}
               animate={{ scale: 1 }}
               transition={{ 
-                type: isLowEndDevice ? "tween" : "spring", 
+                type: isLowEndDevice() ? "tween" : "spring", 
                 stiffness: settings.animationSpeed === 'slow' ? 200 : 
                           settings.animationSpeed === 'medium' ? 300 : 400, 
                 damping: 20,
-                duration: isLowEndDevice ? 0.3 : undefined
+                duration: isLowEndDevice() ? 0.3 : undefined
               }}
             >
               Tic Tac Toe
@@ -1167,7 +1142,7 @@ function App() {
             
             <div className="space-y-4">
               <motion.button
-                whileHover={settings.showAnimations && !isLowEndDevice ? 
+                whileHover={settings.showAnimations && !isLowEndDevice() ? 
                   { scale: 1.03, x: 3, boxShadow: "0 15px 20px -5px rgba(0, 0, 0, 0.1), 0 8px 8px -5px rgba(0, 0, 0, 0.04)" } : 
                   { scale: 1 }
                 }
@@ -1184,7 +1159,7 @@ function App() {
               </motion.button>
               
               <motion.button
-                whileHover={settings.showAnimations && !isLowEndDevice ? 
+                whileHover={settings.showAnimations && !isLowEndDevice() ? 
                   { scale: 1.03, x: 3, boxShadow: "0 15px 20px -5px rgba(0, 0, 0, 0.1), 0 8px 8px -5px rgba(0, 0, 0, 0.04)" } : 
                   { scale: 1 }
                 }
@@ -1204,7 +1179,7 @@ function App() {
               </motion.button>
               
               <motion.button
-                whileHover={settings.showAnimations && !isLowEndDevice ? 
+                whileHover={settings.showAnimations && !isLowEndDevice() ? 
                   { scale: 1.03, x: 3, boxShadow: "0 15px 20px -5px rgba(0, 0, 0, 0.1), 0 8px 8px -5px rgba(0, 0, 0, 0.04)" } : 
                   { scale: 1 }
                 }
@@ -1221,7 +1196,7 @@ function App() {
               </motion.button>
               
               <motion.button
-                whileHover={settings.showAnimations && !isLowEndDevice ? 
+                whileHover={settings.showAnimations && !isLowEndDevice() ? 
                   { scale: 1.03, x: 3, boxShadow: "0 15px 20px -5px rgba(0, 0, 0, 0.1), 0 8px 8px -5px rgba(0, 0, 0, 0.04)" } : 
                   { scale: 1 }
                 }
@@ -1238,7 +1213,7 @@ function App() {
               </motion.button>
               
               <motion.button
-                whileHover={settings.showAnimations && !isLowEndDevice ? 
+                whileHover={settings.showAnimations && !isLowEndDevice() ? 
                   { scale: 1.03, x: 3, boxShadow: "0 15px 20px -5px rgba(0, 0, 0, 0.1), 0 8px 8px -5px rgba(0, 0, 0, 0.04)" } : 
                   { scale: 1 }
                 }
@@ -1255,7 +1230,7 @@ function App() {
               </motion.button>
 
               <motion.button
-                whileHover={settings.showAnimations && !isLowEndDevice ? 
+                whileHover={settings.showAnimations && !isLowEndDevice() ? 
                   { scale: 1.03, x: 3, boxShadow: "0 15px 20px -5px rgba(0, 0, 0, 0.1), 0 8px 8px -5px rgba(0, 0, 0, 0.04)" } : 
                   { scale: 1 }
                 }
@@ -1329,12 +1304,16 @@ function App() {
               />
             )}
             {showSettingsModal && (
-              <SettingsModal
-                settings={settings}
-                onSave={handleSaveSettings}
-                onClose={() => setShowSettingsModal(false)}
-                currentGameMode={gameMode}
-              />
+              <Suspense fallback={<LazyLoadingFallback />}>
+                <LazySettingsModal
+                  settings={settings}
+                  onSave={handleSaveSettings}
+                  onClose={() => {
+                    setShowSettingsModal(false);
+                    playClickSound();
+                  }}
+                />
+              </Suspense>
             )}
             {showGameTypeModal && (
               <GameTypeModal
@@ -1519,17 +1498,20 @@ function App() {
                 boardSize={gameState.boardSize}
               />
             ) : (
-          <Board
-            board={gameState.board}
-                onCellClick={handleCellClick}
-            currentPlayer={gameState.currentPlayer}
-            winningLine={gameState.winningLine}
-                disabled={!!gameState.winner || (gameMode === 'online' && gameState.playerSymbol !== gameState.currentPlayer)}
-            winner={gameState.winner}
-                theme={gameState.theme}
-            settings={settings}
-            fadingSymbols={gameState.fadingSymbols}
-          />
+          <Suspense fallback={<LazyLoadingFallback />}>
+            <LazyBoard
+              board={gameState.board}
+              onCellClick={handleCellClick}
+              currentPlayer={gameState.currentPlayer}
+              winningLine={gameState.winningLine}
+              disabled={!!gameState.winner || (gameMode === 'online' && gameState.playerSymbol !== gameState.currentPlayer)}
+              winner={gameState.winner}
+              theme={gameState.theme}
+              settings={settings}
+              fadingSymbols={gameState.fadingSymbols}
+              animationSpeed={isMobile ? 'fast' : settings.animationSpeed}
+            />
+          </Suspense>
             )}
           </div>
 
@@ -1573,26 +1555,32 @@ function App() {
         
         <AnimatePresence>
           {showSettingsModal && (
-            <SettingsModal
-              settings={settings}
-              onSave={handleSaveSettings}
-              onClose={() => setShowSettingsModal(false)}
-              currentGameMode={gameMode}
-            />
+            <Suspense fallback={<LazyLoadingFallback />}>
+              <LazySettingsModal
+                settings={settings}
+                onSave={handleSaveSettings}
+                onClose={() => {
+                  setShowSettingsModal(false);
+                  playClickSound();
+                }}
+              />
+            </Suspense>
           )}
         </AnimatePresence>
 
         {/* Game result modal for all game modes */}
         <AnimatePresence>
           {gameState.winner && (
-            <GameResultModal
-              winner={gameState.winner}
-              playerSymbol={gameState.playerSymbol || (gameMode === 'ai' ? 'X' : 'X')}
-              onPlayAgain={resetGame}
-              onClose={() => setGameState(prev => ({ ...prev, winner: null }))}
-              onBackToMenu={handleBackToMenu}
-              settings={settings}
-            />
+            <Suspense fallback={<LazyLoadingFallback />}>
+              <LazyGameResultModal
+                winner={gameState.winner}
+                playerSymbol={gameState.playerSymbol || (gameMode === 'ai' ? 'X' : 'X')}
+                onPlayAgain={resetGame}
+                onClose={() => setGameState(prev => ({ ...prev, winner: null }))}
+                onBackToMenu={handleBackToMenu}
+                settings={settings}
+              />
+            </Suspense>
           )}
         </AnimatePresence>
       </div>

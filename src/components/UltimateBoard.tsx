@@ -1,8 +1,7 @@
-import { memo } from 'react';
+import React from 'react';
 import { motion } from 'framer-motion';
-import { Circle, X } from 'lucide-react';
-import { BoardState, Player, Theme, GameSettings, UltimateBoard as UltimateBoardType } from '../types';
-import { getThemeClasses } from '../utils/theme';
+import { UltimateBoard as UltimateBoardType, Player, GameSettings } from '../types';
+import { X, Circle } from 'lucide-react';
 
 interface UltimateBoardProps {
   ultimateBoard: UltimateBoardType;
@@ -10,164 +9,132 @@ interface UltimateBoardProps {
   currentPlayer: Player;
   disabled: boolean;
   winner: Player | 'draw' | null;
-  theme: Theme;
+  theme: string;
   settings: GameSettings;
 }
 
-// Helper component for rendering mini boards
-const MiniBoard = ({ 
-  board, 
-  boardIndex, 
-  onCellClick, 
-  winner, 
-  isActive, 
-  isWon,
-  theme,
-  settings,
-  currentPlayer
-}: { 
-  board: BoardState;
-  boardIndex: number;
-  onCellClick: (boardIndex: number, cellIndex: number) => void;
-  winner: Player | 'draw' | null;
-  isActive: boolean;
-  isWon: boolean;
-  theme: Theme;
-  settings: GameSettings;
-  currentPlayer: Player;
-}) => {
-  const xColor = getThemeClasses(theme, 'xColor');
-  const oColor = getThemeClasses(theme, 'oColor');
-  
-  const getBoardStyles = () => {
-    if (isWon && winner === 'X') return 'ring-blue-500 ring-4 bg-blue-100 dark:bg-blue-900/30';
-    if (isWon && winner === 'O') return 'ring-red-500 ring-4 bg-red-100 dark:bg-red-900/30';
-    if (isWon && winner === 'draw') return 'ring-yellow-500 ring-4 bg-yellow-100 dark:bg-yellow-900/30';
-    if (isActive) return 'ring-green-500 ring-4 shadow-lg'; 
-    return '';
-  };
-
-  return (
-    <motion.div 
-      className={`grid grid-cols-3 gap-1 p-1 sm:p-2 rounded-lg overflow-hidden ${getBoardStyles()} ${
-        settings.darkMode ? 'bg-gray-800' : 'bg-white'
-      } ${isActive ? 'shadow-lg' : 'shadow'}`}
-      animate={{ scale: isActive ? 1.02 : 1 }}
-      transition={{ duration: 0.2 }}
-    >
-      {board.map((cell, cellIndex) => (
-        <motion.button
-          key={cellIndex}
-          className={`h-6 w-6 sm:h-10 sm:w-10 rounded-sm sm:rounded flex items-center justify-center
-            ${settings.darkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-100 hover:bg-gray-200'}
-            ${isActive && !isWon ? 'cursor-pointer' : 'cursor-not-allowed opacity-80'}`}
-          onClick={() => isActive && !isWon && onCellClick(boardIndex, cellIndex)}
-          disabled={!isActive || isWon || cell !== null}
-          whileHover={isActive && !isWon && cell === null ? { scale: 1.1 } : {}}
-          whileTap={isActive && !isWon && cell === null ? { scale: 0.95 } : {}}
-        >
-          {cell === 'X' && (
-            <X className={`w-4 h-4 sm:w-6 sm:h-6 ${xColor}`} strokeWidth={3} />
-          )}
-          {cell === 'O' && (
-            <Circle className={`w-4 h-4 sm:w-6 sm:h-6 ${oColor}`} strokeWidth={3} />
-          )}
-          {!cell && isActive && !isWon && settings.showHints && (
-            <div className={`w-2 h-2 rounded-full opacity-30 ${
-              currentPlayer === 'X' ? xColor : oColor
-            }`} />
-          )}
-        </motion.button>
-      ))}
-    </motion.div>
-  );
-};
-
-// Memoize the UltimateBoard component to prevent unnecessary re-renders
-export const UltimateBoard = memo(({ 
-  ultimateBoard, 
-  onCellClick, 
-  currentPlayer, 
-  disabled, 
+export const UltimateBoard: React.FC<UltimateBoardProps> = ({
+  ultimateBoard,
+  onCellClick,
+  currentPlayer,
+  disabled,
   winner,
   theme,
   settings
-}: UltimateBoardProps) => {
-  const { boards, activeBoard, winners } = ultimateBoard;
-  
-  // Animation settings based on device capability
-  const isLowEndDevice = window.navigator.hardwareConcurrency 
-    ? window.navigator.hardwareConcurrency <= 4
-    : true;
-  
-  const showAnimations = settings.showAnimations && !isLowEndDevice;
-  const getAnimationDuration = () => {
-    if (isLowEndDevice) return 0.2;
-    switch (settings.animationSpeed) {
-      case 'slow': return 0.8;
-      case 'fast': return 0.3;
-      default: return 0.5;
-    }
+}) => {
+  // Function to render a cell within a mini-board
+  const renderCell = (boardIndex: number, cellIndex: number) => {
+    const cellValue = ultimateBoard.boards[boardIndex][cellIndex];
+    const isCellActive = 
+      ultimateBoard.activeBoard === null || 
+      ultimateBoard.activeBoard === boardIndex;
+    const isBoardCompleted = ultimateBoard.winners[boardIndex] !== null;
+    
+    return (
+      <motion.div
+        key={cellIndex}
+        whileHover={{ 
+          scale: !disabled && isCellActive && !isBoardCompleted && cellValue === null ? 1.05 : 1 
+        }}
+        className={`aspect-square flex items-center justify-center relative 
+          ${!disabled && isCellActive && !isBoardCompleted && cellValue === null 
+            ? 'cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700' 
+            : 'cursor-default'} 
+          transition-colors rounded`}
+        onClick={() => {
+          if (!disabled && isCellActive && !isBoardCompleted && cellValue === null) {
+            onCellClick(boardIndex, cellIndex);
+          }
+        }}
+      >
+        {cellValue === 'X' && (
+          <X 
+            className={`w-full h-full p-1 ${
+              theme === 'blue' ? 'text-blue-500' :
+              theme === 'green' ? 'text-green-500' :
+              theme === 'purple' ? 'text-purple-500' :
+              'text-red-500'
+            }`} 
+          />
+        )}
+        {cellValue === 'O' && (
+          <Circle 
+            className={`w-full h-full p-1 ${
+              theme === 'blue' ? 'text-red-500' :
+              theme === 'green' ? 'text-orange-500' :
+              theme === 'purple' ? 'text-pink-500' :
+              'text-blue-500'
+            }`} 
+          />
+        )}
+      </motion.div>
+    );
   };
-  
-  const getMainBoardBg = () => {
-    if (settings.darkMode) return 'bg-gray-900';
-    return getThemeClasses(theme, 'boardBg');
+
+  // Function to render a mini-board
+  const renderBoard = (boardIndex: number) => {
+    const boardWinner = ultimateBoard.winners[boardIndex];
+    const isActive = 
+      ultimateBoard.activeBoard === null || 
+      ultimateBoard.activeBoard === boardIndex;
+    
+    return (
+      <motion.div
+        key={boardIndex}
+        className={`aspect-square p-1 sm:p-2 rounded
+          ${isActive && !boardWinner ? 'bg-blue-100 dark:bg-blue-900/30' : 'bg-gray-100 dark:bg-gray-800'}
+          ${boardWinner === 'X' ? 'bg-blue-200 dark:bg-blue-900/40' : 
+            boardWinner === 'O' ? 'bg-red-200 dark:bg-red-900/40' : 
+            boardWinner === 'draw' ? 'bg-gray-200 dark:bg-gray-700' : ''}
+          relative
+        `}
+      >
+        <div className="grid grid-cols-3 gap-1 w-full h-full">
+          {[...Array(9)].map((_, cellIndex) => renderCell(boardIndex, cellIndex))}
+        </div>
+        
+        {boardWinner && (
+          <div className="absolute inset-0 flex items-center justify-center bg-white/60 dark:bg-gray-900/60 rounded backdrop-blur-sm">
+            {boardWinner === 'X' && <X className="w-2/3 h-2/3 text-blue-500" />}
+            {boardWinner === 'O' && <Circle className="w-2/3 h-2/3 text-red-500" />}
+            {boardWinner === 'draw' && <div className="text-2xl font-bold text-gray-500">Draw</div>}
+          </div>
+        )}
+      </motion.div>
+    );
   };
-  
+
   return (
-    <motion.div 
-      className={`grid grid-cols-3 gap-3 p-4 rounded-xl ${getMainBoardBg()} shadow-xl`}
-      initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ 
-        duration: getAnimationDuration(), 
-        type: isLowEndDevice ? "tween" : "spring", 
-        damping: 20 
-      }}
-    >
-      {Array(9).fill(null).map((_, boardIndex) => (
-        <MiniBoard
-          key={boardIndex}
-          board={boards[boardIndex]}
-          boardIndex={boardIndex}
-          onCellClick={onCellClick}
-          winner={winners[boardIndex]}
-          isActive={activeBoard === boardIndex || activeBoard === null}
-          isWon={winners[boardIndex] !== null}
-          theme={theme}
-          settings={settings}
-          currentPlayer={currentPlayer}
-        />
-      ))}
+    <div className="relative max-w-md w-full mx-auto">
+      <div className="grid grid-cols-3 gap-2 p-2 sm:p-4 bg-white/80 dark:bg-gray-800/80 rounded-2xl shadow-lg backdrop-blur-sm w-full">
+        {[...Array(9)].map((_, boardIndex) => renderBoard(boardIndex))}
+      </div>
       
-      {/* Show winner overlay when game is complete */}
       {winner && (
-        <motion.div
-          className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-40 backdrop-blur-sm rounded-xl"
+        <motion.div 
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ duration: 0.5 }}
+          className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm rounded-2xl"
         >
-          <motion.div
-            className={`bg-white dark:bg-gray-800 p-6 rounded-xl shadow-2xl text-center max-w-xs mx-auto`}
-            initial={{ scale: 0.8, y: 20 }}
-            animate={{ scale: 1, y: 0 }}
-            transition={{ type: "spring", damping: 20 }}
-          >
-            <h2 className="text-2xl font-bold mb-3">
-              {winner === 'draw' 
-                ? 'Game Draw!' 
-                : `Player ${winner} Wins!`}
-            </h2>
-            <div className="text-7xl my-4">
-              {winner === 'draw' 
-                ? '🤝' 
-                : winner === 'X' ? '❌' : '⭕'}
-            </div>
-          </motion.div>
+          <div className="bg-white dark:bg-gray-800 px-6 py-4 rounded-xl shadow-lg text-center">
+            {winner === 'X' && (
+              <div className="flex items-center justify-center space-x-2">
+                <X className="w-8 h-8 text-blue-500" />
+                <span className="text-xl font-bold">Wins!</span>
+              </div>
+            )}
+            {winner === 'O' && (
+              <div className="flex items-center justify-center space-x-2">
+                <Circle className="w-8 h-8 text-red-500" />
+                <span className="text-xl font-bold">Wins!</span>
+              </div>
+            )}
+            {winner === 'draw' && (
+              <div className="text-xl font-bold">It's a Draw!</div>
+            )}
+          </div>
         </motion.div>
       )}
-    </motion.div>
+    </div>
   );
-}); 
+}; 

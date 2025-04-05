@@ -83,35 +83,59 @@ const initializeSocket = (): Socket<ServerToClientEvents, ClientToServerEvents> 
     console.log("Initializing socket connection...");
     const serverUrl = getServerUrl();
     
-    // Optimized socket settings for better mobile performance
+    // Optimize socket settings for better mobile performance
     socket = io(serverUrl, {
-      reconnectionAttempts: 5,
-      reconnectionDelay: 500,
-      timeout: 8000,
+      reconnectionAttempts: 10, // More attempts for mobile connections
+      reconnectionDelay: 300, // Start with shorter delay
+      reconnectionDelayMax: 10000, // But increase it over time to prevent battery drain
+      timeout: 5000, // Shorter initial timeout
       transports: ["websocket"], // Prioritize websocket only for better performance
       forceNew: false,
-      multiplex: true,
+      multiplex: true, // Use a single connection for all requests
       upgrade: true,
       rememberUpgrade: true,
-      pingInterval: 5000, // More frequent pings on mobile
-      pingTimeout: 8000
+      pingInterval: 3000, // More frequent pings on mobile for better connection stability
+      pingTimeout: 5000
     });
     
-    // Log connection events
+    // Add more connection event handling
     socket.on("connect", () => {
       console.log("Socket connected successfully with ID:", socket.id);
+      
+      // Reset any error state in the UI if needed
+      // This could be done via a callback or global state
     });
     
     socket.on("connect_error", (error) => {
       console.error("Socket connection error:", error);
+      
+      // Try a fallback transport if websocket fails
+      if (socket.io.opts.transports.indexOf('websocket') !== -1) {
+        console.log("Falling back from websocket to polling for better compatibility");
+        socket.io.opts.transports = ['polling', 'websocket'];
+      }
     });
     
     socket.io.on("reconnect_attempt", (attempt) => {
       console.log(`Socket reconnection attempt ${attempt}`);
+      
+      // Implement exponential backoff for reconnection attempts
+      const initialDelay = 300;
+      const maxDelay = 10000;
+      socket.io.reconnectionDelay(Math.min(initialDelay * Math.pow(1.5, attempt), maxDelay));
+      
+      // On later attempts, try polling as a fallback
+      if (attempt > 2 && socket.io.opts.transports.indexOf('polling') === -1) {
+        console.log("Adding polling transport for better compatibility");
+        socket.io.opts.transports.push('polling');
+      }
     });
     
-    socket.io.on("reconnect_failed", () => {
-      console.error("Socket reconnection failed after all attempts");
+    socket.io.on("reconnect", () => {
+      console.log("Socket reconnected successfully");
+      
+      // Refresh game state if needed
+      // This could involve rejoining any active rooms
     });
     
     return socket;
@@ -162,6 +186,7 @@ export const leaveRoom = () => {
 };
 
 export const makeMove = (position: number, symbol: string, board: any[]) => {
+  console.log("Emitting make_move with position:", position, "symbol:", symbol);
   socketInstance.emit('make_move', { position, symbol, board });
 };
 
