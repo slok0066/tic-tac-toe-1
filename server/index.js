@@ -213,112 +213,66 @@ io.on('connection', (socket) => {
     }
   });
   
-  // Make a move
+  // Handle moves
   socket.on('make_move', (data) => {
     try {
-      console.log(`Received move from ${socket.id}:`, data);
-      const { position, symbol, board } = data;
+      const { position, symbol } = data;
+      console.log(`Player ${socket.id} making move at position ${position} with symbol ${symbol}`);
       
-      // Find which room this socket is in
+      // Check if player is in a room
       const roomCode = playerToRoom.get(socket.id);
-      
       if (!roomCode) {
-        console.error("Player not in a room:", socket.id);
-        socket.emit('error', 'Not in any room');
+        socket.emit('error', 'Not in a room');
         return;
       }
       
       const room = rooms.get(roomCode);
       if (!room) {
-        console.error("Room not found:", roomCode);
         socket.emit('error', 'Room not found');
         return;
       }
       
+      // Verify the player is in this room
       const player = room.players.find(p => p.id === socket.id);
       if (!player) {
-        console.error("Player not found in room:", socket.id, room.players);
-        socket.emit('error', 'Player not found in room');
+        socket.emit('error', 'Not a player in this room');
         return;
       }
       
-      // Validate that it's the player's turn
+      // Verify it's the player's turn
       if (room.currentTurn !== player.symbol) {
-        console.error("Not player's turn:", socket.id, room.currentTurn, player.symbol);
         socket.emit('error', 'Not your turn');
         return;
       }
       
-      // Update the board
-      if (position >= 0 && position < 9 && room.board[position] === null) {
-        room.board[position] = player.symbol;
-        
-        // Update the current turn
-        room.currentTurn = player.symbol === 'X' ? 'O' : 'X';
-        room.lastMoveTime = Date.now();
-        
-        // Check for win or draw
-        let winner = null;
-        let gameOver = false;
-        
-        // Check rows
-        for (let i = 0; i < 9; i += 3) {
-          if (room.board[i] && room.board[i] === room.board[i + 1] && room.board[i] === room.board[i + 2]) {
-            winner = room.board[i];
-            gameOver = true;
-            break;
-          }
-        }
-        
-        // Check columns
-        if (!gameOver) {
-          for (let i = 0; i < 3; i++) {
-            if (room.board[i] && room.board[i] === room.board[i + 3] && room.board[i] === room.board[i + 6]) {
-              winner = room.board[i];
-              gameOver = true;
-              break;
-            }
-          }
-        }
-        
-        // Check diagonals
-        if (!gameOver) {
-          if (room.board[0] && room.board[0] === room.board[4] && room.board[0] === room.board[8]) {
-            winner = room.board[0];
-            gameOver = true;
-          } else if (room.board[2] && room.board[2] === room.board[4] && room.board[2] === room.board[6]) {
-            winner = room.board[2];
-            gameOver = true;
-          }
-        }
-        
-        // Check for draw
-        if (!gameOver && !room.board.includes(null)) {
-          winner = 'draw';
-          gameOver = true;
-        }
-        
-        // Broadcast the move to all clients in the room
-        io.to(roomCode).emit('move_made', {
-          position,
-          symbol: player.symbol,
-          board: room.board,
-          currentTurn: room.currentTurn
-        });
-        
-        // If the game is over, broadcast the result
-        if (gameOver) {
-          io.to(roomCode).emit('game_over', { winner });
-          console.log(`Game over in room ${roomCode}: ${winner}`);
-        }
-        
-        console.log(`Move made in room ${roomCode}: ${player.symbol} at position ${position}`);
-      } else {
+      // Verify the move is valid
+      if (position < 0 || position >= room.board.length || room.board[position] !== null) {
         socket.emit('error', 'Invalid move');
+        return;
+      }
+      
+      // Make the move
+      room.board[position] = symbol;
+      room.lastMoveTime = Date.now();
+      
+      // Toggle turn
+      room.currentTurn = room.currentTurn === 'X' ? 'O' : 'X';
+      
+      // Notify the other player
+      const opponent = room.players.find(p => p.id !== socket.id);
+      if (opponent) {
+        const opponentSocket = io.sockets.sockets.get(opponent.id);
+        if (opponentSocket) {
+          opponentSocket.emit('move_made', {
+            position,
+            symbol,
+            board: room.board
+          });
+        }
       }
     } catch (error) {
-      console.error("Error processing move:", error);
-      socket.emit('error', 'Failed to process move');
+      console.error('Error making move:', error);
+      socket.emit('error', 'Failed to make move');
     }
   });
   

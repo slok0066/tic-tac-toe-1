@@ -58,7 +58,13 @@ export const cancelRandomMatch = () => {
 };
 
 // Function to make a move
-export const makeMove = (index: number, symbol: string) => {
+export const makeMove = (index: number, symbol: string, currentPlayer: string) => {
+  // Only send move if it's our turn
+  if (symbol !== currentPlayer) {
+    console.log('Not your turn, cannot make move');
+    return;
+  }
+  
   console.log('Making move at position:', index, 'with symbol:', symbol);
   socket.emit('make_move', { position: index, symbol });
 };

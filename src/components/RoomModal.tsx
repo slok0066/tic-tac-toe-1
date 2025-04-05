@@ -103,7 +103,7 @@ export const RoomModal = memo(({ onCreateRoom, onJoinRoom, onClose }: RoomModalP
     try {
       // Listen for game_start event to confirm room joined successfully
       const handleGameStart = () => {
-        console.log('Server confirmed room join');
+        console.log('Successfully joined room');
         setIsLoading(false);
         // Notify parent after server confirmation
         onJoinRoom(roomCode);

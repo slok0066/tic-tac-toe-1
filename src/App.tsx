@@ -245,13 +245,13 @@ function App() {
             const newBoard = [...prev.board];
             newBoard[data.position] = data.symbol;
             
-            // Properly determine the current player - it should be the player's symbol after opponent's move
-            const newCurrentPlayer: Player = prev.playerSymbol === 'X' ? 'X' : 'O';
+            // After opponent move, it's the current player's turn
+            const newCurrentPlayer = prev.playerSymbol || 'X';
               
-              return {
-                ...prev,
+            return {
+              ...prev,
               board: newBoard,
-              currentPlayer: newCurrentPlayer // Ensure this is typed as Player
+              currentPlayer: newCurrentPlayer // Now it's our turn
             };
           });
 
@@ -439,16 +439,23 @@ function App() {
   };
 
   const handleCellClick = (index: number) => {
-    // Make a copy of the board
-    const boardCopy = [...gameState.board];
-    
     // Check if the cell is already filled or game is over
-    if (boardCopy[index] !== null || gameState.winner) {
+    if (gameState.board[index] !== null || gameState.winner) {
+      return;
+    }
+    
+    // For online games, check if it's the player's turn
+    if ((gameMode === 'online' || gameMode === 'random') && 
+        gameState.playerSymbol !== gameState.currentPlayer) {
+      console.log("Not your turn");
       return;
     }
 
     // Handle based on game mode
     const player = gameState.currentPlayer;
+    
+    // Make a copy of the board
+    const boardCopy = [...gameState.board];
     
     // Update the board with the player's move
     boardCopy[index] = player;
@@ -700,7 +707,7 @@ function App() {
         console.log('Sending move to server - position:', index, 'symbol:', gameState.playerSymbol);
         
         import('./utils/socket').then(socket => {
-          socket.makeMove(index, gameState.playerSymbol as string);
+          socket.makeMove(index, gameState.playerSymbol as string, gameState.currentPlayer);
         });
       } else {
         console.log('Not your turn');
@@ -880,7 +887,7 @@ function App() {
     startGame('online', {
       roomCode,
       playerSymbol: 'O',
-      roomStatus: 'joining',
+      roomStatus: 'playing',
       gameType: selectedGameType
     });
     setShowRoomModal(false);
@@ -925,7 +932,7 @@ function App() {
     if (gameState.winner === 'draw') return "It's a draw!";
     if (gameState.winner) return `${gameState.winner} wins!`;
     if (gameState.roomStatus === 'waiting') return "Waiting for opponent...";
-    if (gameState.roomStatus === 'joining') return "Joining game...";
+    if (gameState.roomStatus === 'playing') return "Playing game...";
     if (gameState.roomStatus === 'ended') return "Opponent left the game";
     return `${gameState.currentPlayer}'s turn`;
   };
