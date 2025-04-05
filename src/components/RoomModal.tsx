@@ -58,11 +58,31 @@ export const RoomModal = memo(({ onCreateRoom, onJoinRoom, onClose }: RoomModalP
       console.log('Created room with code:', randomCode);
       setCreatedRoomCode(randomCode);
       setMode('create');
-      setIsLoading(false);
       
       // Send the room creation request to the server and notify parent
       createRoom(randomCode);
-      onCreateRoom(randomCode);
+      
+      // Listen for room_created event to confirm
+      const handleRoomCreated = (data: { roomCode: string }) => {
+        console.log('Server confirmed room creation:', data.roomCode);
+        setIsLoading(false);
+        // Notify parent after server confirmation
+        onCreateRoom(data.roomCode);
+        // Remove this one-time listener
+        socket.off('room_created', handleRoomCreated);
+      };
+      
+      socket.once('room_created', handleRoomCreated);
+      
+      // Set a timeout in case server doesn't respond
+      setTimeout(() => {
+        setIsLoading(false);
+        // Notify parent anyway if server didn't respond in time
+        if (socket.hasListeners('room_created')) {
+          socket.off('room_created', handleRoomCreated);
+          onCreateRoom(randomCode);
+        }
+      }, 2000);
     } catch (err) {
       console.error('Room creation error:', err);
       setError('Failed to create room. Please try again.');
@@ -81,9 +101,39 @@ export const RoomModal = memo(({ onCreateRoom, onJoinRoom, onClose }: RoomModalP
     setIsLoading(true);
     
     try {
-      // Send join room request and notify parent immediately
+      // Listen for game_start event to confirm room joined successfully
+      const handleGameStart = () => {
+        console.log('Server confirmed room join');
+        setIsLoading(false);
+        // Notify parent after server confirmation
+        onJoinRoom(roomCode);
+      };
+      
+      // Listen for error event
+      const handleError = (errorMsg: string) => {
+        console.error('Room join error:', errorMsg);
+        setError(errorMsg || 'Failed to join room');
+        setIsLoading(false);
+        // Remove listeners
+        socket.off('game_start', handleGameStart);
+        socket.off('error', handleError);
+      };
+      
+      socket.once('game_start', handleGameStart);
+      socket.once('error', handleError);
+      
+      // Send join room request
       joinRoom(roomCode);
-      onJoinRoom(roomCode);
+      
+      // Set a timeout in case server doesn't respond
+      setTimeout(() => {
+        if (socket.hasListeners('game_start')) {
+          socket.off('game_start', handleGameStart);
+          socket.off('error', handleError);
+          setIsLoading(false);
+          setError('Connection timeout. Please try again.');
+        }
+      }, 5000);
     } catch (err) {
       console.error('Room join error:', err);
       setError('Failed to join room. Please try again.');

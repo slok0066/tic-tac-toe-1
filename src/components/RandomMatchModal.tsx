@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import socket from '../utils/socket';
+import { useEffect, useState } from 'react';
+import socket, { findRandomMatch, cancelRandomMatch } from '../utils/socket';
 import '../styles/RandomMatchModal.css';
 
 interface RandomMatchModalProps {
@@ -7,20 +7,46 @@ interface RandomMatchModalProps {
 }
 
 const RandomMatchModal = ({ onClose }: RandomMatchModalProps) => {
+  const [searching, setSearching] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [searchTime, setSearchTime] = useState(0);
+
+  // Send match request immediately when modal opens
   useEffect(() => {
-    // Immediately request a random match when the component mounts
-    console.log("Requesting random match");
-    socket.emit('random_match');
+    setSearching(true);
+    console.log("Sending random match request");
+    findRandomMatch();
+    
+    // Set up timer to show search time
+    const timer = setInterval(() => {
+      setSearchTime(prev => prev + 1);
+    }, 1000);
     
     return () => {
-      // Clean up on unmount - cancel matchmaking if the modal is closed
-      console.log("Cancelling random match");
-      socket.emit('cancel_random_match');
+      console.log("Cleaning up random match request");
+      cancelRandomMatch();
+      clearInterval(timer);
+    };
+  }, []);
+  
+  // Listen for socket errors
+  useEffect(() => {
+    const handleError = (errorMsg: string) => {
+      console.error("Match error:", errorMsg);
+      setError(errorMsg);
+      setSearching(false);
+    };
+    
+    socket.on('error', handleError);
+    
+    return () => {
+      socket.off('error', handleError);
     };
   }, []);
 
   const handleCancel = () => {
-    socket.emit('cancel_random_match');
+    console.log("Cancelling match search");
+    cancelRandomMatch();
     onClose();
   };
 
@@ -29,13 +55,25 @@ const RandomMatchModal = ({ onClose }: RandomMatchModalProps) => {
       <div className="modal-content">
         <h2>Finding Opponent...</h2>
         
-        <div className="searching-container">
-          <div className="spinner"></div>
-          <p>Looking for an opponent...</p>
-          <button onClick={handleCancel} className="cancel-btn">
-            Cancel
-          </button>
-        </div>
+        {error && (
+          <div className="error-message">
+            {error}
+            <button onClick={() => setError(null)} className="retry-btn">
+              Try Again
+            </button>
+          </div>
+        )}
+        
+        {!error && (
+          <div className="searching-container">
+            <div className="spinner"></div>
+            <p>Looking for an opponent...</p>
+            <p className="search-time">Time elapsed: {searchTime}s</p>
+            <button onClick={handleCancel} className="cancel-btn">
+              Cancel
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

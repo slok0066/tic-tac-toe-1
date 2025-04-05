@@ -5,8 +5,8 @@ import { ClientToServerEvents, ServerToClientEvents } from "../types";
 console.log('Attempting to connect to socket server...');
 
 // Create socket connection to server
-const serverUrl = process.env.NODE_ENV === 'production' 
-  ? window.location.origin // Production: use same origin as the app
+const serverUrl = import.meta.env.MODE === 'production' 
+  ? 'https://tic-tac-toe-1-1-loqk.onrender.com' // Use the production server URL
   : 'http://localhost:3001'; // Development: connect to local server
 
 console.log('Socket server URL:', serverUrl);
@@ -16,6 +16,7 @@ const socket = io(serverUrl, {
   reconnectionAttempts: 10,
   reconnectionDelay: 1000,
   timeout: 10000,
+  transports: ['websocket', 'polling'],
   autoConnect: true
 });
 
@@ -57,9 +58,9 @@ export const cancelRandomMatch = () => {
 };
 
 // Function to make a move
-export const makeMove = (index: number) => {
-  console.log('Making move at position:', index);
-  socket.emit('make_move', { position: index });
+export const makeMove = (index: number, symbol: string) => {
+  console.log('Making move at position:', index, 'with symbol:', symbol);
+  socket.emit('make_move', { position: index, symbol });
 };
 
 // Function to request a rematch

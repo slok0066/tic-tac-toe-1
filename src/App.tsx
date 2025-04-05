@@ -281,28 +281,26 @@ function App() {
           
           // Determine if this is a waiting event or actual game start
           const isWaiting = data.status === 'waiting';
+          const gameMode = pendingGameMode === 'random' ? 'random' : 'online';
           
           if (isWaiting) {
             console.log("Waiting for opponent to join");
             // Start game in waiting mode
-            startGame('online', {
+            startGame(gameMode, {
               roomCode: data.roomCode,
-              playerSymbol: data.playerSymbol,
+              playerSymbol: data.playerSymbol || (data.isPlayerX ? 'X' : 'O'),
               roomStatus: 'waiting',
               gameType: selectedGameType
             });
           } else {
-            // Determine the game mode
-            const mode = pendingGameMode === 'random' ? 'random' : 'online';
-            
             // Close any modals that might be open
             setShowRoomModal(false);
             setShowRandomMatchModal(false);
             
             // Start game with the received information
-            startGame(mode as GameMode, {
+            startGame(gameMode, {
               roomCode: data.roomCode,
-              playerSymbol: data.playerSymbol,
+              playerSymbol: data.playerSymbol || (data.isPlayerX ? 'X' : 'O'),
               roomStatus: 'playing',
               gameType: selectedGameType
             });
@@ -697,15 +695,13 @@ function App() {
     
     // Handle online game by sending move to server
     if (gameMode === 'online' || gameMode === 'random') {
-      const moveData = {
-        position: index,
-        symbol: gameState.playerSymbol
-      };
-      
       // Only send the move if it's our turn
       if (gameState.currentPlayer === gameState.playerSymbol) {
-        console.log('Sending move to server:', moveData);
-        socket.emit('make_move', moveData);
+        console.log('Sending move to server - position:', index, 'symbol:', gameState.playerSymbol);
+        
+        import('./utils/socket').then(socket => {
+          socket.makeMove(index, gameState.playerSymbol as string);
+        });
       } else {
         console.log('Not your turn');
       }
@@ -892,6 +888,7 @@ function App() {
   };
 
   const handleRandomMatch = () => {
+    // Initialize audio and play click sound
     initializeAudioOnInteraction();
     if (settings.soundEnabled) {
       playClickSound();
@@ -902,7 +899,8 @@ function App() {
     setSelectedGameType('normal');
     setShowRandomMatchModal(true);
     
-    // Game will be started when we get the game_start event from server
+    // The RandomMatchModal will handle the actual random_match event
+    // and game will be started when we get the game_start event from server
   };
 
   const handleSaveSettings = (newSettings: GameSettings) => {
