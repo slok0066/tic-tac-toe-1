@@ -1366,6 +1366,213 @@ function App() {
       
       {/* Rest of the App */}
       <div className="relative w-full min-h-screen flex flex-col">
-        <div className="relative w-full min-h-screen flex flex-col">{
+        {/* Game header with status and back button */}
+        <div className="flex items-center justify-between p-4">
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={handleBackToMenu}
+            className={`${buttonBgClass} px-4 py-2 rounded-xl shadow-md flex items-center space-x-2`}
+          >
+            <ArrowLeft className="w-5 h-5" />
+            <span className="font-medium">Menu</span>
+          </motion.button>
+          
+          <div className={`text-center px-4 py-2 rounded-xl ${settings.darkMode ? 'bg-gray-700 text-white' : 'bg-white/90 text-gray-800'} shadow-md`}>
+            <span className="font-medium">{getGameStatus()}</span>
+          </div>
+          
+          <SettingsButton 
+            onClick={() => setShowSettingsModal(true)} 
+          />
+        </div>
+        
+        {/* Game board area */}
+        <div className="flex-1 flex items-center justify-center p-4">
+          <div className="relative">
+            {/* Timer overlay */}
+            <GameTimer 
+              enabled={settings.showTimer} 
+              darkMode={settings.darkMode}
+              startTime={gameStartTime} 
+            />
+            
+            {/* Render the appropriate board based on game type */}
+            {gameState.boardSize === 'ultimate' ? (
+              <UltimateBoard 
+                board={ultimateBoard}
+                onCellClick={handleUltimateCellClick}
+                currentPlayer={gameState.currentPlayer}
+                boardTheme={settings.theme}
+                symbolStyle={settings.symbolStyle}
+                darkMode={settings.darkMode}
+                animationSpeed={settings.animationSpeed}
+              />
+            ) : isLowEndDevice() || gameState.boardSize === '3x3' ? (
+              <ErrorBoundary>
+                <Suspense fallback={<LazyLoadingFallback />}>
+                  <LazyBoard 
+                    board={gameState.board}
+                    onCellClick={handleCellClick}
+                    winningLine={gameState.winningLine}
+                    currentPlayer={gameState.currentPlayer}
+                    boardTheme={settings.theme}
+                    symbolStyle={settings.symbolStyle}
+                    boardStyle={settings.boardStyle}
+                    boardSize={gameState.boardSize}
+                    showHints={settings.showHints}
+                    animationSpeed={settings.animationSpeed}
+                    isPlayerTurn={(gameMode !== 'online' || gameState.playerSymbol === gameState.currentPlayer)}
+                    darkMode={settings.darkMode}
+                    fadingSymbols={gameState.fadingSymbols}
+                  />
+                </Suspense>
+              </ErrorBoundary>
+            ) : (
+              <LargeBoard 
+                board={gameState.board}
+                onCellClick={handleCellClick}
+                winningLine={gameState.winningLine}
+                currentPlayer={gameState.currentPlayer}
+                boardTheme={settings.theme}
+                symbolStyle={settings.symbolStyle}
+                boardStyle={settings.boardStyle}
+                boardSize={gameState.boardSize}
+                showHints={settings.showHints}
+                animationSpeed={settings.animationSpeed}
+                isPlayerTurn={(gameMode !== 'online' || gameState.playerSymbol === gameState.currentPlayer)}
+                darkMode={settings.darkMode}
+                fadingSymbols={gameState.fadingSymbols}
+              />
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Modals */}
+      <AnimatePresence>
+        {gameState.winner && (
+          <Suspense fallback={<LazyLoadingFallback />}>
+            <LazyGameResultModal
+              winner={gameState.winner}
+              onPlayAgain={resetGame}
+              onMainMenu={handleBackToMenu}
+              darkMode={settings.darkMode}
+              showConfetti={gameState.showConfetti && settings.showAnimations}
+              isLowEndDevice={isLowEndDevice()}
+              theme={settings.theme}
+              gameType={gameState.gameType}
+            />
+          </Suspense>
+        )}
+        {showSettingsModal && (
+          <Suspense fallback={<LazyLoadingFallback />}>
+            <LazySettingsModal
+              settings={settings}
+              onSave={handleSaveSettings}
+              onClose={() => setShowSettingsModal(false)}
+              isBoardSizeSelectable={isBoardSizeSelectable}
+            />
+          </Suspense>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// Toast Component
+function Toast({ message, show, onClose }: { message: string, show: boolean, onClose: () => void }) {
+  useEffect(() => {
+    if (show) {
+      const timer = setTimeout(() => {
+        onClose();
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [show, onClose]);
+
+  return (
+    <AnimatePresence>
+      {show && (
+        <motion.div 
+          initial={{ opacity: 0, y: 50 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 50 }}
+          className="fixed bottom-4 left-0 right-0 mx-auto w-max max-w-sm bg-gray-800 text-white px-6 py-3 rounded-xl shadow-lg z-50 flex items-center"
+        >
+          <span>{message}</span>
+          <button 
+            onClick={onClose}
+            className="ml-3 text-gray-300 hover:text-white"
+          >
+            <X size={18} />
+          </button>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+// Game Type Modal component
+interface GameTypeModalProps {
+  onSelect: (gameType: GameType) => void;
+  onClose: () => void;
+  darkMode: boolean;
+}
+
+function GameTypeModal({ onSelect, onClose, darkMode }: GameTypeModalProps) {
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+    >
+      <motion.div 
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.9, opacity: 0 }}
+        className={`${darkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-800'} rounded-2xl p-6 shadow-xl max-w-md w-full`}
+      >
+        <h2 className="text-2xl font-bold mb-4">Select Game Type</h2>
+        
+        <div className="space-y-3 mb-6">
+          <button
+            onClick={() => onSelect('normal')}
+            className={`w-full p-3 rounded-xl ${darkMode ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-100 hover:bg-blue-200'} text-left`}
+          >
+            <span className="font-semibold block">Normal</span>
+            <span className={`text-sm ${darkMode ? 'text-blue-200' : 'text-blue-700'}`}>Classic tic-tac-toe. First to get 3 in a row wins.</span>
+          </button>
+          
+          <button
+            onClick={() => onSelect('ultimate')}
+            className={`w-full p-3 rounded-xl ${darkMode ? 'bg-purple-600 hover:bg-purple-700' : 'bg-purple-100 hover:bg-purple-200'} text-left`}
+          >
+            <span className="font-semibold block">Ultimate Tic-Tac-Toe</span>
+            <span className={`text-sm ${darkMode ? 'text-purple-200' : 'text-purple-700'}`}>Strategic nested boards. Win smaller boards to claim spaces on the main board.</span>
+          </button>
+          
+          <button
+            onClick={() => onSelect('infinity')}
+            className={`w-full p-3 rounded-xl ${darkMode ? 'bg-green-600 hover:bg-green-700' : 'bg-green-100 hover:bg-green-200'} text-left`}
+          >
+            <span className="font-semibold block">Infinity Mode</span>
+            <span className={`text-sm ${darkMode ? 'text-green-200' : 'text-green-700'}`}>Each player can only have 3 marks on the board. Oldest mark is removed when placing a 4th.</span>
+          </button>
+        </div>
+        
+        <div className="flex justify-end space-x-3">
+          <button
+            onClick={onClose}
+            className={`px-4 py-2 rounded-lg ${darkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'}`}
+          >
+            Cancel
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
 
 export default App;
