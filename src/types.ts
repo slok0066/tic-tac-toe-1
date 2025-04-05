@@ -1,4 +1,5 @@
 export type Player = 'X' | 'O';
+export type Winner = Player | 'draw' | null;
 export type BoardState = (Player | null)[];
 export type GameMode = 'ai' | 'friend' | 'online' | 'random';
 export type GameType = 'normal' | 'infinity';
@@ -43,11 +44,12 @@ export interface UltimateBoard {
 export interface GameState {
   board: BoardState;
   currentPlayer: Player;
-  winner: Player | 'draw' | null;
+  winner: Winner;
   winningLine: number[] | null;
   difficulty?: Difficulty;
   roomCode?: string;
   playerSymbol?: Player;
+  aiSymbol?: Player;
   roomStatus?: RoomStatus;
   theme: Theme;
   showConfetti: boolean;
@@ -64,6 +66,7 @@ export interface GameState {
   // For infinity mode
   moveHistory?: MoveInfo[];
   fadingSymbols?: number[];
+  nextFadingSymbols?: number[]; // Symbols that will fade on next move
   // Game result for online mode
   gameResult?: Player | 'draw' | null;
   // For online play

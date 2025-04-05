@@ -28,19 +28,41 @@ export const WINNING_COMBINATIONS_5X5 = [
 ];
 
 // Get the appropriate winning combinations based on board size
-export const getWinningCombinations = (boardSize: BoardSize): number[][] => {
-  switch (boardSize) {
-    case '3x3':
-      return WINNING_COMBINATIONS;
-    case '4x4':
-      return WINNING_COMBINATIONS_4X4;
-    case '5x5':
-      return WINNING_COMBINATIONS_5X5;
-    case 'ultimate':
-      return WINNING_COMBINATIONS; // Ultimate uses 3x3 for each mini-board and the meta-board
-    default:
-      return WINNING_COMBINATIONS;
+export const getWinningCombinations = (boardSize: number | BoardSize): number[][] => {
+  // Convert BoardSize to number if needed
+  const size = typeof boardSize === 'string' ? getBoardSizeNumeric(boardSize) : boardSize;
+  
+  const combinations: number[][] = [];
+  
+  // Rows
+  for (let i = 0; i < size; i++) {
+    const row: number[] = [];
+    for (let j = 0; j < size; j++) {
+      row.push(i * size + j);
+    }
+    combinations.push(row);
   }
+  
+  // Columns
+  for (let j = 0; j < size; j++) {
+    const col: number[] = [];
+    for (let i = 0; i < size; i++) {
+      col.push(i * size + j);
+    }
+    combinations.push(col);
+  }
+  
+  // Diagonals
+  const diagonal1: number[] = [];
+  const diagonal2: number[] = [];
+  for (let i = 0; i < size; i++) {
+    diagonal1.push(i * size + i);
+    diagonal2.push(i * size + (size - 1 - i));
+  }
+  combinations.push(diagonal1);
+  combinations.push(diagonal2);
+  
+  return combinations;
 };
 
 // Get board size based on the length of the board array
@@ -194,89 +216,162 @@ const minimax = (
   }
 };
 
-export const getAIMove = (board: BoardState, difficulty: Difficulty, boardSize: BoardSize = '3x3'): number => {
-  const availableMoves = board.reduce<number[]>((acc, cell, index) => {
-    if (cell === null) acc.push(index);
-    return acc;
-  }, []);
-
-  // If no moves available, return -1 (invalid move)
-  if (availableMoves.length === 0) return -1;
-
-  // Easy: Random moves
+// AI move function
+export const getAIMove = (board: BoardState, difficulty: Difficulty, boardSize: BoardSize): number => {
+  console.log(`Getting AI move with difficulty: ${difficulty}, board size: ${boardSize}`);
+  
+  // Count available cells
+  const availableCells = board.map((cell, index) => cell === null ? index : -1).filter(index => index !== -1);
+  
+  if (availableCells.length === 0) {
+    return -1; // No available moves
+  }
+  
+  // For 'easy' difficulty, just choose a random empty cell
   if (difficulty === 'easy') {
-    return availableMoves[Math.floor(Math.random() * availableMoves.length)];
+    const randomIndex = Math.floor(Math.random() * availableCells.length);
+    return availableCells[randomIndex];
   }
-
-  // Medium: Mix of smart and random moves
-  if (difficulty === 'medium') {
-    if (Math.random() > 0.7) {
-      return availableMoves[Math.floor(Math.random() * availableMoves.length)];
-    }
-  }
-
-  // For Medium, Hard & God: Try to win or block
-  for (const move of availableMoves) {
-    // Check if AI can win
-    const testBoard = [...board];
-    testBoard[move] = 'O';
-    if (checkWinner(testBoard, boardSize).winner === 'O') {
-      return move;
-    }
-
-    // Check if need to block player
-    testBoard[move] = 'X';
-    if (checkWinner(testBoard, boardSize).winner === 'X') {
-      return move;
-    }
-  }
-
-  // God: Perfect play using minimax with no randomness
-  if (difficulty === 'god') {
-    let bestScore = -Infinity;
-    let bestMove = availableMoves[0];
-
-    for (const move of availableMoves) {
-      const testBoard = [...board];
-      testBoard[move] = 'O';
-      const score = minimax(testBoard, 0, false, -Infinity, Infinity, boardSize);
-      if (score > bestScore) {
-        bestScore = score;
-        bestMove = move;
+  
+  const sizeNum = getBoardSizeNumeric(boardSize);
+  
+  // For medium difficulty and above, try to find a winning move
+  if (difficulty === 'medium' || difficulty === 'hard' || difficulty === 'god') {
+    // Try each available cell to see if there's a winning move
+    for (const cellIndex of availableCells) {
+      const boardCopy = [...board];
+      boardCopy[cellIndex] = 'O'; // Assume AI is O
+      
+      if (checkForWin(boardCopy, 'O', sizeNum)) {
+        console.log(`AI found winning move at ${cellIndex}`);
+        return cellIndex; // Found a winning move
       }
     }
-    return bestMove;
+    
+    // No winning move found, try to block opponent's winning move
+    for (const cellIndex of availableCells) {
+      const boardCopy = [...board];
+      boardCopy[cellIndex] = 'X'; // Assume player is X
+      
+      if (checkForWin(boardCopy, 'X', sizeNum)) {
+        console.log(`AI blocking player's winning move at ${cellIndex}`);
+        return cellIndex; // Block opponent's winning move
+      }
+    }
   }
-
-  // Hard: Use minimax but occasionally make non-optimal moves
-  if (difficulty === 'hard') {
-    // 80% of the time, play optimally
-    if (Math.random() < 0.8) {
-      let bestScore = -Infinity;
-      let bestMove = availableMoves[0];
-
-      for (const move of availableMoves) {
-        const testBoard = [...board];
-        testBoard[move] = 'O';
-        const score = minimax(testBoard, 0, false, -Infinity, Infinity, boardSize);
-        if (score > bestScore) {
-          bestScore = score;
-          bestMove = move;
+  
+  // For hard and god difficulties, use more advanced strategies
+  if (difficulty === 'hard' || difficulty === 'god') {
+    // For standard 3x3 board
+    if (sizeNum === 3) {
+      // Take center if available
+      if (board[4] === null) {
+        console.log("AI taking center position");
+        return 4;
+      }
+      
+      // Take corners if available
+      const corners = [0, 2, 6, 8].filter(corner => board[corner] === null);
+      if (corners.length > 0) {
+        const cornerIndex = Math.floor(Math.random() * corners.length);
+        console.log(`AI taking corner at ${corners[cornerIndex]}`);
+        return corners[cornerIndex];
+      }
+      
+      // Take sides
+      const sides = [1, 3, 5, 7].filter(side => board[side] === null);
+      if (sides.length > 0) {
+        const sideIndex = Math.floor(Math.random() * sides.length);
+        console.log(`AI taking side at ${sides[sideIndex]}`);
+        return sides[sideIndex];
+      }
+    }
+    
+    // For larger boards or when central strategy doesn't apply
+    // Look for fork opportunities (2 potential winning lines)
+    if (difficulty === 'god') {
+      for (const cellIndex of availableCells) {
+        const boardCopy = [...board];
+        boardCopy[cellIndex] = 'O';
+        
+        // Check if this move creates two winning lines
+        if (countPotentialWinningLines(boardCopy, 'O', sizeNum) >= 2) {
+          console.log(`AI found fork opportunity at ${cellIndex}`);
+          return cellIndex;
         }
       }
-      return bestMove;
+      
+      // Block opponent's fork opportunities
+      for (const cellIndex of availableCells) {
+        const boardCopy = [...board];
+        boardCopy[cellIndex] = 'X';
+        
+        if (countPotentialWinningLines(boardCopy, 'X', sizeNum) >= 2) {
+          console.log(`AI blocking opponent's fork at ${cellIndex}`);
+          return cellIndex;
+        }
+      }
     }
   }
+  
+  // If no strategic move found, choose a random empty cell
+  // But give higher weight to strategic positions (center, corners) for medium+ difficulty
+  if ((difficulty === 'medium' || difficulty === 'hard' || difficulty === 'god') && sizeNum === 3) {
+    // Weighted random selection - center and corners have higher probability
+    const weights = availableCells.map(index => {
+      if (index === 4) return 5; // Center has highest weight
+      if ([0, 2, 6, 8].includes(index)) return 3; // Corners have medium weight
+      return 1; // Sides have lowest weight
+    });
+    
+    const weightedIndex = weightedRandomSelection(availableCells, weights);
+    console.log(`AI chose weighted random move at ${weightedIndex}`);
+    return weightedIndex;
+  }
+  
+  // Truly random move (for easy difficulty or as fallback)
+  const randomIndex = Math.floor(Math.random() * availableCells.length);
+  console.log(`AI chose random move at ${availableCells[randomIndex]}`);
+  return availableCells[randomIndex];
+};
 
-  // If center is available, take it
-  const centerIndex = boardSize === '3x3' ? 4 : 
-                     boardSize === '4x4' ? 5 : // Use 5 (near center) for 4x4 
-                     boardSize === '5x5' ? 12 : 4; // Center is 12 in 5x5
-                     
-  if (board[centerIndex] === null) return centerIndex;
+// Helper function for weighted random selection
+const weightedRandomSelection = (items: number[], weights: number[]): number => {
+  if (items.length === 0) return -1; // Handle empty array case
+  
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+  let random = Math.random() * totalWeight;
+  
+  for (let i = 0; i < items.length; i++) {
+    random -= weights[i];
+    if (random <= 0) {
+      return items[i];
+    }
+  }
+  
+  // If we somehow get here, just return the first item
+  return items[0];
+};
 
-  // Otherwise, choose random corner or side
-  return availableMoves[Math.floor(Math.random() * availableMoves.length)];
+// Helper function to count possible winning lines for a player
+const countPotentialWinningLines = (board: BoardState, player: Player, boardSize: number): number => {
+  let count = 0;
+  
+  // Generate winning combinations based on board size
+  const winningCombinations = getWinningCombinations(boardSize);
+  
+  for (const combination of winningCombinations) {
+    const line = combination.map(index => board[index]);
+    
+    // Count lines where all cells are either player's symbol or empty
+    // And at least one cell is the player's symbol
+    if (line.every(cell => cell === player || cell === null) && 
+        line.some(cell => cell === player)) {
+      count++;
+    }
+  }
+  
+  return count;
 };
 
 // Add utility functions for theme and board classes
@@ -348,4 +443,33 @@ export const debounce = <F extends (...args: any[]) => any>(
     }
     timeout = setTimeout(() => func(...args), waitFor);
   };
+};
+
+// Helper function to get numeric board size from BoardSize type
+const getBoardSizeNumeric = (boardSize: BoardSize): number => {
+  switch (boardSize) {
+    case '3x3': return 3;
+    case '4x4': return 4;
+    case '5x5': return 5;
+    case 'ultimate': return 3; // Ultimate uses 3x3 meta-board
+    default: return 3;
+  }
+};
+
+// Helper function to check if a player has a winning move on the board
+const checkForWin = (board: BoardState, player: Player, boardSize: number): boolean => {
+  // Get winning combinations based on board size
+  const winningCombinations = getWinningCombinations(boardSize);
+  
+  // Check each winning combination
+  for (const combination of winningCombinations) {
+    const line = combination.map(index => board[index]);
+    
+    // Check if all cells in this line are the player's symbol
+    if (line.every(cell => cell === player)) {
+      return true;
+    }
+  }
+  
+  return false;
 };

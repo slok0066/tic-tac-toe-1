@@ -13,7 +13,8 @@ interface BoardProps {
   winner: Player | 'draw' | null;
   theme: Theme;
   settings: GameSettings;
-  fadingSymbols?: number[]; // Added for Infinity mode
+  fadingSymbols?: number[]; // Symbols currently fading
+  nextFadingSymbols?: number[]; // Symbols that will fade on next move
   animationSpeed?: 'slow' | 'medium' | 'fast'; // Added for direct animation control
 }
 
@@ -28,6 +29,7 @@ export const Board = memo(({
   theme,
   settings,
   fadingSymbols = [], // Default to empty array
+  nextFadingSymbols = [], // Default to empty array
   animationSpeed
 }: BoardProps) => {
   const xColor = getThemeClasses(theme, 'xColor');
@@ -101,6 +103,11 @@ export const Board = memo(({
     return board[index] === currentPlayer;
   };
 
+  // Check if this cell is marked to fade on next move
+  const willFadeOnNextMove = (index: number): boolean => {
+    return nextFadingSymbols.includes(index) && isCellForCurrentPlayer(index);
+  };
+
   // Render custom symbols or use default Lucide icons
   const renderSymbol = (player: Player, isHint = false, isFading = false) => {
     const isClassic = settings.symbolStyle === 'classic';
@@ -154,6 +161,9 @@ export const Board = memo(({
           // Check if this cell should show fading effect (only when it's the player's turn and it's their symbol)
           const shouldShowFading = fadingSymbols.includes(index) && isCellForCurrentPlayer(index);
           
+          // Check if this cell will fade on next move
+          const willFadeNext = willFadeOnNextMove(index);
+          
           return (
             <motion.button
               key={index}
@@ -161,6 +171,7 @@ export const Board = memo(({
                 ${disabled ? 'cursor-not-allowed' : ''}
                 ${winningLine?.includes(index) ? winningCellClass : ''}
                 ${shouldShowFading ? 'ring-2 ring-red-500' : ''}
+                ${willFadeNext ? 'ring-2 ring-yellow-500' : ''}
                 transition-all duration-200`}
               onClick={() => onCellClick(index)}
               disabled={cell !== null || disabled}
@@ -187,21 +198,21 @@ export const Board = memo(({
                   animate={{ 
                     scale: 1, 
                     rotate: 0,
-                    opacity: shouldShowFading ? [1, 0.7, 1] : 1
+                    opacity: shouldShowFading ? [1, 0.7, 1] : willFadeNext ? [1, 0.85, 1] : 1
                   }}
                   transition={{ 
                     type: isLowEndDevice ? "tween" : "spring", 
                     stiffness: isLowEndDevice ? undefined : 500, 
                     damping: isLowEndDevice ? undefined : 15, 
                     duration: getAnimationDuration() * 0.8,
-                    opacity: shouldShowFading ? {
+                    opacity: shouldShowFading || willFadeNext ? {
                       repeat: Infinity,
-                      duration: 1.5
+                      duration: willFadeNext ? 2 : 1.5
                     } : undefined
                   }}
                   className="w-full h-full flex items-center justify-center relative"
                 >
-                  {renderSymbol(cell, false, shouldShowFading)}
+                  {renderSymbol(cell, false, shouldShowFading || willFadeNext)}
                   
                   {/* Fading symbol indicator - Only show when it's the player's turn and it's their symbol */}
                   {shouldShowFading && (
@@ -217,6 +228,24 @@ export const Board = memo(({
                     >
                       <span className="text-xs text-red-600 dark:text-red-400 bg-white/70 dark:bg-black/50 px-1 py-1 rounded shadow-md">
                         Will be removed
+                      </span>
+                    </motion.div>
+                  )}
+
+                  {/* Next to fade indicator - show when it's a player's symbol that will fade on next move */}
+                  {willFadeNext && (
+                    <motion.div 
+                      className="absolute inset-0 flex items-center justify-center backdrop-blur-[1px] bg-yellow-500/20 rounded-xl"
+                      animate={{
+                        opacity: [0.5, 0.8, 0.5]
+                      }}
+                      transition={{
+                        repeat: Infinity,
+                        duration: 2.5
+                      }}
+                    >
+                      <span className="text-xs text-yellow-700 dark:text-yellow-300 bg-white/70 dark:bg-black/50 px-1 py-1 rounded shadow-md">
+                        Next to fade
                       </span>
                     </motion.div>
                   )}

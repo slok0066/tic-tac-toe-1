@@ -25,6 +25,7 @@ import {
 import { TutorialPage } from './components/TutorialPage';
 import { UltimateBoard } from './components/UltimateBoard';
 import { LargeBoard } from './components/LargeBoard';
+import { processInfinityMove, removeFadingSymbols, getNextFadingSymbols } from './utils/infinityMode';
 
 const initialGameState: GameState = {
   board: Array(9).fill(null),
@@ -153,7 +154,10 @@ function App() {
   const [showRandomMatchModal, setShowRandomMatchModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showGameTypeModal, setShowGameTypeModal] = useState(false);
+  const [showSymbolSelectionModal, setShowSymbolSelectionModal] = useState(false);
   const [pendingGameMode, setPendingGameMode] = useState<GameMode | null>(null);
+  const [selectedDifficulty, setSelectedDifficulty] = useState<Difficulty>('medium');
+  const [selectedPlayerSymbol, setSelectedPlayerSymbol] = useState<'X' | 'O'>('X');
   const [gameStartTime, setGameStartTime] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedGameType, setSelectedGameType] = useState<GameType>('normal');
@@ -222,6 +226,98 @@ function App() {
       setError("Failed to initialize application. Please refresh the page.");
     }
   }, []);
+
+  // Monitor for AI turns in Infinity mode
+  useEffect(() => {
+    // Skip if not in AI mode or not Infinity game type
+    if (gameMode !== 'ai' || gameState.gameType !== 'infinity' || gameState.winner) {
+      return;
+    }
+
+    // Skip if playerSymbol or aiSymbol is not defined yet
+    if (!gameState.playerSymbol || !gameState.aiSymbol) {
+      console.log("Symbols not defined yet, skipping AI turn");
+      return;
+    }
+
+    // If it's the AI's turn, make a move
+    if (gameState.currentPlayer === gameState.aiSymbol) {
+      console.log("AI's turn detected in useEffect for Infinity mode", gameState.aiSymbol);
+      
+      // Add a small delay to simulate thinking
+      const timeoutId = setTimeout(() => {
+        // Get current state
+        const currentBoard = [...gameState.board];
+        const currentMoveHistory = [...(gameState.moveHistory || [])];
+        const aiSymbol = gameState.aiSymbol as Player;
+        const playerSymbol = gameState.playerSymbol as Player;
+        
+        // Check if any available moves
+        const availableIndices = currentBoard.map((cell, idx) => cell === null ? idx : -1).filter(idx => idx !== -1);
+        if (availableIndices.length === 0) {
+          console.log("No available moves for AI");
+          return;
+        }
+        
+        // Get AI move
+        const aiDifficulty = gameState.difficulty || 'medium';
+        console.log(`AI thinking with difficulty ${aiDifficulty}`);
+        const aiIndex = getAIMove(currentBoard, aiDifficulty, gameState.boardSize || '3x3');
+        console.log(`AI chose move at index ${aiIndex}`);
+        
+        if (aiIndex >= 0 && currentBoard[aiIndex] === null) {
+          // Process move for infinity mode
+          const { board: aiUpdatedBoard, moveHistory: aiUpdatedMoveHistory, nextFadingSymbols } = 
+            processInfinityMove(currentBoard, aiIndex, aiSymbol, currentMoveHistory);
+          
+          // Play move sound
+          playMoveSound(aiSymbol);
+          
+          // Check for winner
+          const { winner, line } = checkWinner(aiUpdatedBoard, gameState.boardSize);
+          
+          if (winner) {
+            // Play win sound
+            setTimeout(() => {
+              playResultSound(winner === 'draw' ? 'draw' : 'win');
+            }, 300);
+            
+            // Update state with winner
+            setGameState(prev => ({
+              ...prev,
+              board: aiUpdatedBoard,
+              moveHistory: aiUpdatedMoveHistory,
+              winner,
+              winningLine: line,
+              showConfetti: winner !== 'draw',
+              nextFadingSymbols
+            }));
+          } else {
+            // Update state and switch to player's turn
+            setGameState(prev => ({
+              ...prev,
+              board: aiUpdatedBoard, 
+              moveHistory: aiUpdatedMoveHistory,
+              currentPlayer: playerSymbol,
+              nextFadingSymbols
+            }));
+          }
+        } else {
+          console.log("AI couldn't find a valid move");
+          // If no valid move, switch back to player
+          setGameState(prev => ({
+            ...prev,
+            currentPlayer: playerSymbol
+          }));
+        }
+      }, 1000);
+      
+      // Clean up timeout if component unmounts
+      return () => clearTimeout(timeoutId);
+    }
+  }, [gameMode, gameState.gameType, gameState.currentPlayer, gameState.aiSymbol, 
+      gameState.board, gameState.moveHistory, gameState.winner, gameState.difficulty, 
+      gameState.boardSize, gameState.playerSymbol, playMoveSound, playResultSound]);
 
   // Update sound enabled state when settings change
   useEffect(() => {
@@ -450,6 +546,12 @@ function App() {
       console.log("Not your turn");
       return;
     }
+    
+    // For AI mode, ensure player can only play when it's their turn
+    if (gameMode === 'ai' && gameState.playerSymbol !== gameState.currentPlayer) {
+      console.log("Not your turn - AI is thinking");
+      return;
+    }
 
     // Handle based on game mode
     const player = gameState.currentPlayer;
@@ -465,56 +567,149 @@ function App() {
     
     // For Infinity mode, track move history and manage symbol removal
     if (isInfinityMode()) {
-      // Create a copy of the current move history or initialize if it doesn't exist
-      const moveHistory = [...(gameState.moveHistory || [])];
+      console.log("Processing player move in Infinity mode");
       
-      // Add the current move to the history
-      const newMove: MoveInfo = {
-        player,
-        index,
-      timestamp: Date.now()
-    };
+      // Process the move using our utility function - symbols are now removed immediately
+      const { board: updatedBoard, moveHistory: updatedMoveHistory, nextFadingSymbols } = 
+        processInfinityMove(boardCopy, index, player, gameState.moveHistory || []);
       
-      // Filter moves by the current player
-      const playerMoves = moveHistory.filter(move => move.player === player);
+      // Check for a winner with the updated board state (after old symbols are removed)
+      const { winner, line } = checkWinner(updatedBoard, gameState.boardSize);
       
-      // Check if player will have more than 3 symbols on the board
-      let fadingSymbols = [...(gameState.fadingSymbols || [])];
-      let newMoveHistory = [...moveHistory, newMove];
-      
-      // If player already has 3 symbols, remove the oldest one
-      if (playerMoves.length >= 3) {
-        // Sort by timestamp to find the oldest
-        playerMoves.sort((a, b) => a.timestamp - b.timestamp);
-        const oldestMove = playerMoves[0];
+      if (winner) {
+        // Play win/draw sound
+        setTimeout(() => {
+          playResultSound(winner === 'draw' ? 'draw' : 'win');
+        }, 300);
         
-        // Remove the symbol from the board
-        boardCopy[oldestMove.index] = null;
-        
-        // Remove the oldest move from the history
-        newMoveHistory = newMoveHistory.filter(
-          m => !(m.player === oldestMove.player && m.index === oldestMove.index)
-        );
-        
-        // Remove from fading symbols if it was there
-        fadingSymbols = fadingSymbols.filter(idx => idx !== oldestMove.index);
-      } 
-      // If player will have exactly 3 symbols, mark next player's oldest for removal
-      else if (playerMoves.length === 2) {
-        // Get next player
-        const nextPlayer = player === 'X' ? 'O' : 'X';
-        
-        // Find moves by the next player
-        const nextPlayerMoves = moveHistory.filter(move => move.player === nextPlayer);
-        
-        // If next player has 3 symbols, mark the oldest for fading
-        if (nextPlayerMoves.length >= 3) {
-          nextPlayerMoves.sort((a, b) => a.timestamp - b.timestamp);
-          const oldestNextPlayerMove = nextPlayerMoves[0];
-          fadingSymbols = [oldestNextPlayerMove.index];
-        }
+        setGameState(prev => ({
+          ...prev,
+          board: updatedBoard,
+          winner,
+          winningLine: line,
+          showConfetti: winner !== 'draw',
+          moveHistory: updatedMoveHistory,
+          nextFadingSymbols
+        }));
+        return;
       }
       
+      // For AI mode in Infinity, update state and let the useEffect handle AI's turn
+      if (gameMode === 'ai') {
+        const aiSymbol = gameState.aiSymbol as Player;
+        
+        // Update game state with the new move and set to AI's turn
+        setGameState(prev => ({
+          ...prev,
+          board: updatedBoard,
+          moveHistory: updatedMoveHistory,
+          currentPlayer: aiSymbol, // Set to AI's turn
+          nextFadingSymbols
+        }));
+        
+        // The useEffect will handle the AI's move
+        return;
+      }
+      
+      // For non-AI mode in Infinity, just update the state
+      setGameState(prev => ({
+        ...prev,
+        board: updatedBoard,
+        moveHistory: updatedMoveHistory,
+        currentPlayer: prev.currentPlayer === 'X' ? 'O' : 'X',
+        nextFadingSymbols
+      }));
+      
+      return;
+    }
+    
+    // Handle AI mode (normal game)
+    else if (gameMode === 'ai') {
+      // Get the player and AI symbols
+      const playerSymbol = gameState.playerSymbol as Player;
+      const aiSymbol = gameState.aiSymbol as Player;
+      
+      // Check for a winner after player's move
+      const { winner, line } = checkWinner(boardCopy, gameState.boardSize);
+      
+      if (winner) {
+        // Play win/draw sound
+        setTimeout(() => {
+          playResultSound(winner === 'draw' ? 'draw' : 'win');
+        }, 300);
+        
+        setGameState(prev => ({
+          ...prev,
+          board: boardCopy,
+          winner,
+          winningLine: line,
+          showConfetti: winner !== 'draw'
+        }));
+        return;
+      }
+      
+      // Update the game state with player's move and set AI as current player
+      setGameState(prev => ({
+        ...prev,
+        board: boardCopy,
+        currentPlayer: aiSymbol
+      }));
+      
+      // Schedule AI's move
+      setTimeout(() => {
+        console.log("AI turn in Normal mode");
+        // Get a fresh copy of the current board state
+        setGameState(prevState => {
+          const currentBoard = [...prevState.board];
+          
+          // Get the AI move using the configured difficulty
+          const aiDifficulty = prevState.difficulty || 'medium';
+          console.log(`Getting AI move with difficulty: ${aiDifficulty}`);
+          const aiIndex = getAIMove(currentBoard, aiDifficulty, prevState.boardSize || '3x3');
+          console.log("AI selected move at index:", aiIndex);
+          
+          if (aiIndex >= 0 && currentBoard[aiIndex] === null) {
+            // Make AI move
+            currentBoard[aiIndex] = aiSymbol;
+            
+            // Play the AI move sound
+            playMoveSound(aiSymbol);
+            
+            // Check if the AI won
+            const { winner: aiWinner, line: aiWinLine } = checkWinner(currentBoard, prevState.boardSize);
+            
+            if (aiWinner) {
+              // Small delay to ensure sound plays after the move sound
+              setTimeout(() => {
+                playResultSound(aiWinner === 'draw' ? 'draw' : 'win');
+              }, 300);
+              
+              return {
+                ...prevState,
+                board: currentBoard,
+                winner: aiWinner,
+                winningLine: aiWinLine,
+                showConfetti: aiWinner !== 'draw'
+              };
+            } else {
+              console.log("AI normal move completed, switching back to player turn");
+              return {
+                ...prevState,
+                board: currentBoard,
+                currentPlayer: playerSymbol
+              };
+            }
+          }
+          // If AI couldn't make a move, keep it player's turn
+          return prevState;
+        });
+      }, 700);
+      
+      return;
+    }
+    
+    // For non-AI modes
+    else {
       // Check for a winner
       const { winner, line } = checkWinner(boardCopy, gameState.boardSize);
       
@@ -529,10 +724,9 @@ function App() {
           board: boardCopy,
           winner,
           winningLine: line,
-          showConfetti: winner !== 'draw',
-          moveHistory: newMoveHistory,
-          fadingSymbols
+          showConfetti: winner !== 'draw'
         }));
+        
         return;
       }
       
@@ -540,177 +734,21 @@ function App() {
       setGameState(prev => ({
         ...prev,
         board: boardCopy,
-        currentPlayer: prev.currentPlayer === 'X' ? 'O' : 'X',
-        moveHistory: newMoveHistory,
-        fadingSymbols
+        currentPlayer: prev.currentPlayer === 'X' ? 'O' : 'X'
       }));
       
-      return;
-    }
-    
-    // Normal game mode logic continues from here
-    // Check for a winner
-    const { winner, line } = checkWinner(boardCopy, gameState.boardSize);
-    
-    if (winner) {
-      // Small delay to ensure sound plays after the move sound
-      setTimeout(() => {
-        playResultSound(winner === 'draw' ? 'draw' : 'win');
-      }, 300);
-      
-      setGameState(prev => ({
-        ...prev,
-        board: boardCopy,
-        winner,
-        winningLine: line,
-        showConfetti: winner !== 'draw'
-      }));
-      return;
-    }
-    
-    // Update game state
-    setGameState(prev => ({
-      ...prev,
-      board: boardCopy,
-      currentPlayer: prev.currentPlayer === 'X' ? 'O' : 'X'
-    }));
-    
-    // Handle AI move with delay
-    if (gameMode === 'ai' && player === 'X') {
-      setTimeout(() => {
-        // Get a fresh copy of the board at this point
-        const boardAfterPlayerMove = [...boardCopy];
-        
-        // Get the AI move
-        const aiIndex = getAIMove(boardAfterPlayerMove, gameState.difficulty || 'medium', gameState.boardSize || '3x3');
-        
-        if (aiIndex >= 0 && boardAfterPlayerMove[aiIndex] === null) {
-          boardAfterPlayerMove[aiIndex] = 'O';
+      // Handle online game by sending move to server
+      if (gameMode === 'online' || gameMode === 'random') {
+        // Only send the move if it's our turn
+        if (gameState.currentPlayer === gameState.playerSymbol) {
+          console.log('Sending move to server - position:', index, 'symbol:', gameState.playerSymbol);
           
-          // Play the AI move sound
-          playMoveSound('O');
-          
-          // For Infinity mode, handle the AI move history
-          if (isInfinityMode()) {
-            setGameState(prev => {
-              // Create a copy of the current move history
-              const moveHistory = [...(prev.moveHistory || [])];
-              
-              // Add the AI move
-              const newMove: MoveInfo = {
-                player: 'O',
-                index: aiIndex,
-                timestamp: Date.now()
-              };
-              
-              // Filter AI moves
-              const aiMoves = moveHistory.filter(move => move.player === 'O');
-              
-              // Check if AI will have more than 3 symbols
-              let fadingSymbols = [...(prev.fadingSymbols || [])];
-              let newMoveHistory = [...moveHistory, newMove];
-              
-              // If AI already has 3 symbols, remove the oldest
-              if (aiMoves.length >= 3) {
-                // Find the oldest AI move
-                aiMoves.sort((a, b) => a.timestamp - b.timestamp);
-                const oldestMove = aiMoves[0];
-                
-                // Remove the symbol
-                boardAfterPlayerMove[oldestMove.index] = null;
-                
-                // Remove from history
-                newMoveHistory = newMoveHistory.filter(
-                  m => !(m.player === oldestMove.player && m.index === oldestMove.index)
-                );
-                
-                // Remove from fading symbols
-                fadingSymbols = fadingSymbols.filter(idx => idx !== oldestMove.index);
-              }
-              // If AI will have exactly 3 symbols, mark player's oldest for removal
-              else if (aiMoves.length === 2) {
-                // Find player moves
-                const playerMoves = moveHistory.filter(move => move.player === 'X');
-                
-                // If player has 3 symbols, mark the oldest for fading
-                if (playerMoves.length >= 3) {
-                  playerMoves.sort((a, b) => a.timestamp - b.timestamp);
-                  const oldestPlayerMove = playerMoves[0];
-                  fadingSymbols = [oldestPlayerMove.index];
-                }
-              }
-              
-              // Check if the AI won
-              const { winner, line } = checkWinner(boardAfterPlayerMove, prev.boardSize);
-              
-              if (winner) {
-                // Small delay to ensure sound plays after the move sound
-                setTimeout(() => {
-                  playResultSound(winner === 'draw' ? 'draw' : 'win');
-                }, 300);
-                
-                return {
-                  ...prev,
-                  board: boardAfterPlayerMove,
-      winner,
-      winningLine: line,
-                  showConfetti: winner !== 'draw',
-      moveHistory: newMoveHistory,
-                  fadingSymbols
-                };
-              }
-              
-              return {
-                ...prev,
-                board: boardAfterPlayerMove,
-                currentPlayer: 'X',
-                moveHistory: newMoveHistory,
-                fadingSymbols
-              };
-            });
-            
-            return;
-          }
-          
-          // Normal AI game logic continues
-          // Check if the AI won
-          const { winner, line } = checkWinner(boardAfterPlayerMove, gameState.boardSize);
-          
-          if (winner) {
-            // Small delay to ensure sound plays after the move sound
-            setTimeout(() => {
-              playResultSound(winner === 'draw' ? 'draw' : 'win');
-            }, 300);
-            
-            setGameState(prev => ({
-              ...prev,
-              board: boardAfterPlayerMove,
-              winner,
-              winningLine: line,
-              showConfetti: winner !== 'draw'
-            }));
-          } else {
-            setGameState(prev => ({
-              ...prev,
-              board: boardAfterPlayerMove,
-              currentPlayer: 'X'
-            }));
-          }
+          import('./utils/socket').then(socket => {
+            socket.makeMove(index, gameState.playerSymbol as string, gameState.currentPlayer);
+          });
+        } else {
+          console.log('Not your turn');
         }
-      }, 500); // Delay AI move for UX
-    }
-    
-    // Handle online game by sending move to server
-    if (gameMode === 'online' || gameMode === 'random') {
-      // Only send the move if it's our turn
-      if (gameState.currentPlayer === gameState.playerSymbol) {
-        console.log('Sending move to server - position:', index, 'symbol:', gameState.playerSymbol);
-        
-        import('./utils/socket').then(socket => {
-          socket.makeMove(index, gameState.playerSymbol as string, gameState.currentPlayer);
-        });
-      } else {
-        console.log('Not your turn');
       }
     }
   };
@@ -732,8 +770,19 @@ function App() {
     } else if (pendingGameMode === 'online') {
       // For online mode, show the room modal
       setShowRoomModal(true);
+    } else if (pendingGameMode === 'ai') {
+      // For AI mode, start game with selected difficulty, game type and player symbol
+      startGame('ai', { 
+        difficulty: selectedDifficulty,
+        gameType: type,
+        playerSymbol: selectedPlayerSymbol,
+        moveHistory: type === 'infinity' ? [] : undefined,
+        fadingSymbols: type === 'infinity' ? [] : undefined,
+        nextFadingSymbols: type === 'infinity' ? [] : undefined
+      });
+      setPendingGameMode(null);
     } else {
-      // Start game for local modes
+      // For friend mode
       startGame(pendingGameMode as GameMode, { gameType: type });
       setPendingGameMode(null);
     }
@@ -746,65 +795,235 @@ function App() {
 
   // Then use it in the resetGame function:
   const resetGame = (gameType = gameState.gameType) => {
+    console.log("Resetting game with type:", gameType, "mode:", gameMode);
     playClickSound();
     
-    // Reset timer if needed
-    if (settings.showTimer) {
-      setGameStartTime(new Date());
+    // Preserve the current game settings
+    const preserveSettings = {
+      difficulty: gameState.difficulty,
+      playerSymbol: gameState.playerSymbol,
+      aiSymbol: gameState.aiSymbol,
+      boardSize: gameState.boardSize,
+      theme: gameState.theme,
+      boardStyle: gameState.boardStyle,
+      symbolStyle: gameState.symbolStyle
+    };
+    
+    // Create a new empty board
+    let newBoard: BoardState;
+    
+    // Determine board size and create appropriate board
+    switch (preserveSettings.boardSize) {
+      case '4x4':
+        newBoard = Array(16).fill(null);
+        break;
+      case '5x5':
+        newBoard = Array(25).fill(null);
+        break;
+      case 'ultimate':
+        setUltimateBoard(initializeUltimateBoard());
+        newBoard = Array(9).fill(null);
+        break;
+      default:
+        newBoard = Array(9).fill(null);
     }
     
-    setGameState(prev => ({
+    // For AI mode, determine if AI should go first
+    let initialPlayer: Player = 'X';
+    let aiTurn = false;
+    
+    if (gameMode === 'ai') {
+      const playerSymbol = preserveSettings.playerSymbol || 'X';
+      const aiSymbol = preserveSettings.aiSymbol || 'O';
+      aiTurn = playerSymbol === 'O'; // AI goes first if player is O
+      initialPlayer = aiTurn ? 'X' : 'O';
+      
+      console.log(`Reset: Player=${playerSymbol}, AI=${aiSymbol}, AI first=${aiTurn}`);
+    }
+    
+    // Reset timer
+    setGameStartTime(new Date());
+    
+    // Update game state with fresh board and reset winner
+    setGameState({
       ...initialGameState,
-      difficulty: prev.difficulty,
-      roomCode: prev.roomCode,
-      playerSymbol: prev.playerSymbol,
-      roomStatus: prev.roomStatus,
-      theme: settings.theme,
-      gameType,
-      moveHistory: isInfinityGameType(gameType) ? [] : undefined,
-      fadingSymbols: isInfinityGameType(gameType) ? [] : undefined
-    }));
+      board: newBoard,
+      currentPlayer: initialPlayer,
+      theme: preserveSettings.theme,
+      boardStyle: preserveSettings.boardStyle,
+      symbolStyle: preserveSettings.symbolStyle,
+      gameType: gameType,
+      moveHistory: gameType === 'infinity' ? [] : undefined,
+      fadingSymbols: gameType === 'infinity' ? [] : undefined,
+      nextFadingSymbols: gameType === 'infinity' ? [] : undefined,
+      // Keep AI-specific settings
+      difficulty: preserveSettings.difficulty,
+      playerSymbol: preserveSettings.playerSymbol,
+      aiSymbol: preserveSettings.aiSymbol,
+      boardSize: preserveSettings.boardSize
+    });
+    
+    // For AI mode, handle first move if needed
+    if (gameMode === 'ai' && aiTurn) {
+      console.log("AI should make first move after reset");
+      
+      // Small delay to allow state update to complete
+      setTimeout(() => {
+        // AI makes first move as X
+        const difficulty = preserveSettings.difficulty || 'medium';
+        console.log(`AI making first move with difficulty ${difficulty}`);
+        const aiMove = getAIMove(newBoard, difficulty, preserveSettings.boardSize || '3x3');
+        
+        if (aiMove !== -1) {
+          console.log(`AI will place at index ${aiMove}`);
+          
+          // Process differently based on game type
+          if (gameType === 'infinity') {
+            // For infinity mode, use processInfinityMove with completely fresh history
+            const { board: aiUpdatedBoard, moveHistory: aiUpdatedMoveHistory, nextFadingSymbols } = 
+              processInfinityMove(newBoard, aiMove, 'X', []);
+            
+            // Play move sound
+            playMoveSound('X');
+            
+            // Update game state
+            setGameState(prev => ({
+              ...prev,
+              board: aiUpdatedBoard,
+              moveHistory: aiUpdatedMoveHistory,
+              nextFadingSymbols,
+              currentPlayer: 'O'  // Now it's player's turn
+            }));
+          } else {
+            // Regular mode
+            const boardCopy = [...newBoard];
+            boardCopy[aiMove] = 'X';
+            playMoveSound('X');
+            
+            setGameState(prev => ({
+              ...prev,
+              board: boardCopy,
+              currentPlayer: 'O'
+            }));
+          }
+        }
+      }, 800);
+    }
   };
 
   const startGame = (mode: GameMode, options: any = {}) => {
-    try {
-      const { difficulty, roomCode, playerSymbol, roomStatus, gameType = 'normal' } = options;
-      
-      // Reset any previous game state
-      resetGame(gameType);
-      
-      // Update game mode state
-      setGameMode(mode);
-      
-      // For AI mode, set the difficulty
-      if (mode === 'ai' && difficulty) {
-        setGameState(prev => ({
-          ...prev,
-          difficulty,
-          symbolStyle: settings.symbolStyle,
-          boardStyle: settings.boardStyle
-        }));
-      }
-      
-      // For online/friend modes, handle room setup
-      if ((mode === 'online' || mode === 'random') && roomCode) {
-        setGameState(prev => ({
-          ...prev,
-          roomCode,
-          playerSymbol: playerSymbol || 'X',
-          roomStatus: roomStatus || 'waiting',
-          symbolStyle: settings.symbolStyle,
-          boardStyle: settings.boardStyle
-        }));
-      }
-      
-      // Set start time for timer
-      setGameStartTime(new Date());
-      
-      console.log(`${mode} game started:`, options);
-    } catch (error) {
-      console.error("Error starting game:", error);
-      setError("Failed to start game. Please try again.");
+    // Game mode is AI, Friend, or Online
+    setGameMode(mode);
+    
+    // Get the board size and prepare initial board
+    const boardSize = options.boardSize || settings.boardSize;
+    let initialBoard: BoardState;
+    
+    // Determine board size and create appropriate board
+    switch (boardSize) {
+      case '4x4':
+        initialBoard = Array(16).fill(null);
+        break;
+      case '5x5':
+        initialBoard = Array(25).fill(null);
+        break;
+      case 'ultimate':
+        // For ultimate, set up the meta board
+        initialBoard = Array(9).fill(null);
+        break;
+      default:
+        // Default 3x3 board
+        initialBoard = Array(9).fill(null);
+    }
+    
+    // For AI mode, determine player symbols
+    let initialPlayer: Player = 'X';
+    let playerSymbol: Player = options.playerSymbol || selectedPlayerSymbol;
+    let aiSymbol: Player = playerSymbol === 'X' ? 'O' : 'X';
+    
+    // Log the AI game initialization
+    if (mode === 'ai') {
+      console.log(`Starting AI game: player=${playerSymbol}, AI=${aiSymbol}, difficulty=${options.difficulty || selectedDifficulty}, gameType=${options.gameType || 'normal'}`);
+    }
+    
+    // Create the updated game state
+    const updatedGameState: Partial<GameState> = {
+      board: initialBoard,
+      currentPlayer: initialPlayer,
+      winner: null,
+      winningLine: null,
+      theme: settings.theme,
+      showConfetti: false,
+      gameType: options.gameType || 'normal',
+      boardSize,
+      boardStyle: settings.boardStyle,
+      symbolStyle: settings.symbolStyle,
+      moveHistory: options.gameType === 'infinity' ? [] : undefined,
+      fadingSymbols: options.gameType === 'infinity' ? [] : undefined,
+      nextFadingSymbols: options.gameType === 'infinity' ? [] : undefined
+    };
+    
+    // Add mode-specific properties
+    if (mode === 'ai') {
+      updatedGameState.difficulty = options.difficulty || selectedDifficulty;
+      updatedGameState.playerSymbol = playerSymbol;
+      updatedGameState.aiSymbol = aiSymbol;
+    } else if (mode === 'online' || mode === 'random') {
+      updatedGameState.roomCode = options.roomCode;
+      updatedGameState.roomStatus = options.roomStatus || 'playing';
+      updatedGameState.playerSymbol = options.playerSymbol === 'O' ? 'O' : 'X';
+    }
+    
+    // Update the game state
+    setGameState(prev => ({
+      ...prev,
+      ...updatedGameState
+    }));
+    
+    // Start the game timer
+    setGameStartTime(new Date());
+    
+    // For AI mode, let AI make first move if player is O
+    if (mode === 'ai' && selectedPlayerSymbol === 'O') {
+      setTimeout(() => {
+        // AI will make the first move (as X)
+        const difficulty = options.difficulty || selectedDifficulty;
+        const aiMove = getAIMove(initialBoard, difficulty, boardSize);
+        console.log("AI making first move at index:", aiMove);
+        
+        if (aiMove !== -1) {
+          // Check if this is infinity mode
+          if (options.gameType === 'infinity') {
+            // For infinity mode, use processInfinityMove
+            const { board: aiUpdatedBoard, moveHistory: aiUpdatedMoveHistory, nextFadingSymbols } = 
+              processInfinityMove(initialBoard, aiMove, 'X', []);
+            
+            // Play the AI move sound
+            playMoveSound('X');
+            
+            setGameState(prev => ({
+              ...prev,
+              board: aiUpdatedBoard,
+              moveHistory: aiUpdatedMoveHistory,
+              nextFadingSymbols,
+              currentPlayer: 'O'  // Now it's player's turn
+            }));
+          } else {
+            // Make AI move directly for normal mode
+            const boardCopy = [...initialBoard];
+            boardCopy[aiMove] = 'X';
+            
+            // Play the AI move sound
+            playMoveSound('X');
+            
+            setGameState(prev => ({
+              ...prev,
+              board: boardCopy,
+              currentPlayer: 'O'  // Now it's player's turn
+            }));
+          }
+        }
+      }, 500);
     }
   };
 
@@ -852,20 +1071,58 @@ function App() {
 
   // Update button click handlers to initialize audio
   const handleGameModeSelect = (mode: GameMode) => {
-    // Initialize audio on first user interaction
     initializeAudioOnInteraction();
-    playClickSound();
+    if (settings.soundEnabled) {
+      playClickSound();
+    }
     
-    // For all modes, show game type selection first
+    // Set the pending game mode
     setPendingGameMode(mode);
-    setShowGameTypeModal(true);
+    
+    // Show appropriate modal based on the selected mode
+    if (mode === 'ai') {
+      setShowDifficultyModal(true);
+    } else if (mode === 'friend') {
+      // For friend mode, go directly to game type selection
+      setShowGameTypeModal(true);
+    } else if (mode === 'online') {
+      // For online mode, go directly to room selection
+      setShowRoomModal(true);
+    } else if (mode === 'random') {
+      // For random mode, show random match modal
+      setShowRandomMatchModal(true);
+    }
   };
 
   const handleDifficultySelect = (difficulty: Difficulty) => {
-    playClickSound();
-    startGame(pendingGameMode as GameMode, { difficulty });
+    if (settings.soundEnabled) {
+      playClickSound();
+    }
+    setSelectedDifficulty(difficulty);
     setShowDifficultyModal(false);
-    setPendingGameMode(null);
+    
+    // Randomly select player symbol (50/50 chance)
+    const randomSymbol = Math.random() > 0.5 ? 'X' : 'O';
+    setSelectedPlayerSymbol(randomSymbol as 'X' | 'O');
+    
+    // Show toast notification about assigned symbol
+    setToastMessage(`You'll play as ${randomSymbol}. ${randomSymbol === 'X' ? 'You go first!' : 'AI goes first!'}`);
+    setShowToast(true);
+    
+    // After selecting difficulty, go directly to game type selection
+    setShowGameTypeModal(true);
+  };
+
+  // Add a new function to handle symbol selection
+  const handleSymbolSelect = (playerSymbol: 'X' | 'O') => {
+    if (settings.soundEnabled) {
+      playClickSound();
+    }
+    setSelectedPlayerSymbol(playerSymbol);
+    setShowSymbolSelectionModal(false);
+    
+    // After selecting symbol, show game type modal
+    setShowGameTypeModal(true);
   };
 
   const handleCreateRoom = (roomCode: string) => {
@@ -946,6 +1203,76 @@ function App() {
     setGameMode(null);
     setGameState({...initialGameState, theme: settings.theme});
   };
+
+  // Effect to handle fading symbols in Infinity mode
+  useEffect(() => {
+    // Only run for Infinity mode when there are fading symbols
+    if (!isInfinityMode() || !gameState.fadingSymbols || gameState.fadingSymbols.length === 0) {
+      return;
+    }
+    
+    console.log("Fading symbols effect running for:", gameState.fadingSymbols);
+    
+    // Set a timeout to remove the fading symbols after showing the visual effect
+    const timeout = setTimeout(() => {
+      setGameState(prev => {
+        // Create copies of the board and move history
+        const newBoard = [...prev.board];
+        const newMoveHistory = [...(prev.moveHistory || [])];
+        
+        // Process each fading symbol
+        prev.fadingSymbols?.forEach(index => {
+          // Get the player who placed this symbol
+          const player = newBoard[index];
+          
+          if (player) {
+            // Remove the symbol from the board
+            newBoard[index] = null;
+            
+            // Remove this move from the history
+            const filteredHistory = newMoveHistory.filter(
+              move => !(move.index === index && move.player === player)
+            );
+            
+            // Update move history
+            newMoveHistory.length = 0;
+            newMoveHistory.push(...filteredHistory);
+            
+            console.log(`Removed symbol at index ${index} for player ${player}`);
+          }
+        });
+        
+        // Check if removing the symbols resulted in a win or draw
+        const { winner, line } = checkWinner(newBoard, prev.boardSize);
+        
+        if (winner) {
+          // Play the appropriate sound effect
+          playResultSound(winner === 'draw' ? 'draw' : 'win');
+          
+          return {
+            ...prev,
+            board: newBoard,
+            moveHistory: newMoveHistory,
+            fadingSymbols: [],
+            winner,
+            winningLine: line,
+            showConfetti: winner !== 'draw'
+          };
+        }
+        
+        // Return updated state with fading symbols cleared
+        return {
+          ...prev,
+          board: newBoard,
+          moveHistory: newMoveHistory,
+          fadingSymbols: []
+        };
+      });
+    }, 1500); // Delay for 1.5 seconds to show the visual effect
+    
+    // Clean up timeout on unmount or when fadingSymbols changes
+    return () => clearTimeout(timeout);
+  }, [gameState.fadingSymbols]);
 
   // Update the handleOpenTutorial function to ensure it works properly
   const handleOpenTutorial = () => {
@@ -1328,6 +1655,16 @@ function App() {
                 }}
               />
             )}
+            {showSymbolSelectionModal && (
+              <SymbolSelectionModal
+                onSelect={handleSymbolSelect}
+                onClose={() => {
+                  setShowSymbolSelectionModal(false);
+                  setPendingGameMode(null);
+                }}
+                darkMode={settings.darkMode}
+              />
+            )}
             {showRoomModal && (
               <RoomModal
                 onCreateRoom={handleCreateRoom}
@@ -1478,6 +1815,11 @@ function App() {
                 transition={{ delay: 0.2 }}
               >
                 AI Difficulty: <span className={`font-semibold ${gameState.difficulty === 'god' ? 'text-red-500' : ''}`}>{gameState.difficulty}</span>
+                {gameMode === 'ai' && gameState.currentPlayer === gameState.aiSymbol && !gameState.winner && (
+                  <span className="ml-2 inline-flex items-center text-blue-500">
+                    <span className="animate-pulse mr-1">●</span> AI thinking...
+                  </span>
+                )}
               </motion.p>
             )}
             {gameMode === 'online' && gameState.roomCode && (
@@ -1530,31 +1872,34 @@ function App() {
               />
             ) : (gameState.boardSize === '4x4' || gameState.boardSize === '5x5') && gameMode ? (
               <LargeBoard
-            board={gameState.board}
+                board={gameState.board}
                 onCellClick={handleCellClick}
-            currentPlayer={gameState.currentPlayer}
-            winningLine={gameState.winningLine}
-                disabled={!!gameState.winner || (gameMode === 'online' && gameState.playerSymbol !== gameState.currentPlayer)}
-            winner={gameState.winner}
+                currentPlayer={gameState.currentPlayer}
+                winningLine={gameState.winningLine}
+                disabled={!!gameState.winner || (gameMode === 'online' && gameState.playerSymbol !== gameState.currentPlayer) 
+                        || (gameMode === 'ai' && gameState.currentPlayer !== gameState.playerSymbol)}
+                winner={gameState.winner}
                 theme={gameState.theme}
                 settings={settings}
                 boardSize={gameState.boardSize}
               />
             ) : (
-          <Suspense fallback={<LazyLoadingFallback />}>
-            <LazyBoard
-              board={gameState.board}
-              onCellClick={handleCellClick}
-              currentPlayer={gameState.currentPlayer}
-              winningLine={gameState.winningLine}
-              disabled={!!gameState.winner || (gameMode === 'online' && gameState.playerSymbol !== gameState.currentPlayer)}
-              winner={gameState.winner}
-              theme={gameState.theme}
-            settings={settings}
-            fadingSymbols={gameState.fadingSymbols}
-              animationSpeed={isMobile ? 'fast' : settings.animationSpeed}
-          />
-          </Suspense>
+              <Suspense fallback={<LazyLoadingFallback />}>
+                <LazyBoard
+                  board={gameState.board}
+                  onCellClick={handleCellClick}
+                  currentPlayer={gameState.currentPlayer}
+                  winningLine={gameState.winningLine}
+                  disabled={!!gameState.winner || (gameMode === 'online' && gameState.playerSymbol !== gameState.currentPlayer)
+                          || (gameMode === 'ai' && gameState.currentPlayer !== gameState.playerSymbol)}
+                  winner={gameState.winner}
+                  theme={gameState.theme}
+                  settings={settings}
+                  fadingSymbols={gameState.fadingSymbols}
+                  nextFadingSymbols={gameState.nextFadingSymbols}
+                  animationSpeed={isMobile ? 'fast' : settings.animationSpeed}
+                />
+              </Suspense>
             )}
           </div>
 
@@ -1594,6 +1939,67 @@ function App() {
               </motion.button>
             )}
           </motion.div>
+
+          {/* Replay Button */}
+          {gameState.winner && (
+            <motion.div 
+              className="mt-6 flex justify-center"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 1 }}
+            >
+              <motion.button
+                onClick={() => {
+                  console.log("Play again clicked");
+                  
+                  // Force a complete reset of the game state
+                  const currentGameType = gameState.gameType;
+                  const currentDifficulty = gameState.difficulty;
+                  const currentPlayerSymbol = gameState.playerSymbol;
+                  const currentAiSymbol = gameState.aiSymbol;
+                  const currentBoardSize = gameState.boardSize;
+                  
+                  // Set to initial state first
+                  setGameState({
+                    ...initialGameState,
+                    theme: settings.theme,
+                    boardStyle: settings.boardStyle,
+                    symbolStyle: settings.symbolStyle,
+                    gameType: currentGameType,
+                    difficulty: currentDifficulty,
+                    playerSymbol: currentPlayerSymbol,
+                    aiSymbol: currentAiSymbol,
+                    boardSize: currentBoardSize,
+                    moveHistory: currentGameType === 'infinity' ? [] : undefined,
+                    fadingSymbols: currentGameType === 'infinity' ? [] : undefined,
+                    nextFadingSymbols: currentGameType === 'infinity' ? [] : undefined
+                  });
+                  
+                  // Then restart the game after a short delay
+                  setTimeout(() => {
+                    resetGame(currentGameType);
+                  }, 50);
+                  
+                  // Play click sound
+                  playClickSound();
+                }}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className={`py-2 px-6 rounded-lg flex items-center justify-center font-medium shadow-md ${
+                  gameState.winner === 'X' 
+                    ? 'bg-red-500 hover:bg-red-600 text-white' 
+                    : gameState.winner === 'O'
+                    ? 'bg-blue-500 hover:bg-blue-600 text-white'
+                    : 'bg-yellow-500 hover:bg-yellow-600 text-white'
+                }`}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Play Again
+              </motion.button>
+            </motion.div>
+          )}
         </motion.div>
         
         <AnimatePresence>
@@ -1624,6 +2030,17 @@ function App() {
                 settings={settings}
               />
             </Suspense>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {showToast && (
+            <Toast 
+              message={toastMessage} 
+              show={showToast} 
+              onClose={() => setShowToast(false)}
+              darkMode={settings.darkMode}
+            />
           )}
         </AnimatePresence>
       </div>
@@ -1706,6 +2123,129 @@ const GameTypeModal = ({
           Cancel
         </motion.button>
       </motion.div>
+    </motion.div>
+  );
+};
+
+// Symbol Selection Modal for AI mode
+const SymbolSelectionModal = ({ 
+  onSelect, 
+  onClose,
+  darkMode = false
+}: { 
+  onSelect: (symbol: 'X' | 'O') => void; 
+  onClose: () => void;
+  darkMode?: boolean;
+}) => {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+    >
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.9, opacity: 0 }}
+        transition={{ type: "spring", stiffness: 400, damping: 30 }}
+        className={`${darkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-800'} rounded-2xl p-6 shadow-xl max-w-sm w-full`}
+      >
+        <h2 className={`text-2xl font-bold mb-6 ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+          Choose Your Symbol
+        </h2>
+
+        <div className="space-y-4">
+          <motion.button
+            whileHover={{ scale: 1.03, y: -2 }}
+            whileTap={{ scale: 0.97 }}
+            onClick={() => onSelect('X')}
+            className={`w-full p-4 ${darkMode ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-500 hover:bg-blue-600'} text-white rounded-xl flex items-center justify-between`}
+          >
+            <div className="flex items-center">
+              <span className="text-3xl font-bold mr-3">X</span>
+              <div className="text-left">
+                <div className="font-semibold">Play as X</div>
+                <div className="text-xs text-blue-100">You go first</div>
+              </div>
+            </div>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="w-6 h-6">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </motion.button>
+
+          <motion.button
+            whileHover={{ scale: 1.03, y: -2 }}
+            whileTap={{ scale: 0.97 }}
+            onClick={() => onSelect('O')}
+            className={`w-full p-4 ${darkMode ? 'bg-green-600 hover:bg-green-700' : 'bg-green-500 hover:bg-green-600'} text-white rounded-xl flex items-center justify-between`}
+          >
+            <div className="flex items-center">
+              <span className="text-3xl font-bold mr-3">O</span>
+              <div className="text-left">
+                <div className="font-semibold">Play as O</div>
+                <div className="text-xs text-green-100">AI goes first</div>
+              </div>
+            </div>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="w-6 h-6">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </motion.button>
+        </div>
+
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={onClose}
+          className={`mt-6 px-4 py-2 rounded-lg ${darkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'} font-medium text-center w-full`}
+        >
+          Cancel
+        </motion.button>
+      </motion.div>
+    </motion.div>
+  );
+};
+
+// Toast notification component
+const Toast = ({ message, show, onClose, darkMode = false }: { 
+  message: string; 
+  show: boolean; 
+  onClose: () => void;
+  darkMode?: boolean;
+}) => {
+  useEffect(() => {
+    if (show) {
+      const timer = setTimeout(() => {
+        onClose();
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [show, onClose]);
+
+  if (!show) return null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 50 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 50 }}
+      className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-50"
+    >
+      <div className={`px-6 py-3 rounded-lg shadow-lg ${
+        darkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-800'
+      } flex items-center gap-3 max-w-xs sm:max-w-md`}>
+        <div className="flex-1">{message}</div>
+        <button 
+          onClick={onClose}
+          className={`p-1 rounded-full ${
+            darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
+          }`}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
     </motion.div>
   );
 };
