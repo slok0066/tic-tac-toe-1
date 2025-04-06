@@ -202,11 +202,11 @@ const minimax = (
     return maxEval;
   } else {
     let minEval = Infinity;
-    for (let i = 0; i < board.length; i++) {
-      if (board[i] === null) {
+  for (let i = 0; i < board.length; i++) {
+    if (board[i] === null) {
         board[i] = 'X';
         const evalScore = minimax(board, depth + 1, true, alpha, beta, boardSize);
-        board[i] = null;
+      board[i] = null;
         minEval = Math.min(minEval, evalScore);
         beta = Math.min(beta, evalScore);
         if (beta <= alpha) break; // Alpha-beta pruning

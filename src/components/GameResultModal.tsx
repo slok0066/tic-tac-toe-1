@@ -11,6 +11,7 @@ interface GameResultModalProps {
   onClose: () => void;
   onBackToMenu: () => void;
   settings: GameSettings;
+  isAIInfinityMode?: boolean;
 }
 
 export const GameResultModal = ({ 
@@ -19,7 +20,8 @@ export const GameResultModal = ({
   onPlayAgain, 
   onClose, 
   onBackToMenu,
-  settings
+  settings,
+  isAIInfinityMode = false
 }: GameResultModalProps) => {
   const [showConfetti, setShowConfetti] = useState(false);
   const isWinner = winner === playerSymbol;
@@ -208,18 +210,20 @@ export const GameResultModal = ({
             </motion.p>
 
             <div className="grid grid-cols-2 gap-4 w-full">
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.5 }}
-                onClick={onPlayAgain}
-                className="py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-xl font-medium flex items-center justify-center gap-2 shadow-md"
-              >
-                <Repeat className="w-4 h-4" /> 
-                Play Again
-              </motion.button>
+              {!isAIInfinityMode && (
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.5 }}
+                  onClick={onPlayAgain}
+                  className="py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-xl font-medium flex items-center justify-center gap-2 shadow-md"
+                >
+                  <Repeat className="w-4 h-4" /> 
+                  Play Again
+                </motion.button>
+              )}
               
               <motion.button
                 whileHover={{ scale: 1.05 }}
@@ -228,7 +232,7 @@ export const GameResultModal = ({
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.6 }}
                 onClick={onBackToMenu}
-                className="py-3 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white rounded-xl font-medium flex items-center justify-center gap-2 shadow-md"
+                className={`py-3 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white rounded-xl font-medium flex items-center justify-center gap-2 shadow-md ${isAIInfinityMode ? 'col-span-2' : ''}`}
               >
                 <Home className="w-4 h-4" />
                 Main Menu

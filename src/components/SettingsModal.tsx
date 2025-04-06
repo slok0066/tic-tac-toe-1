@@ -180,7 +180,9 @@ export const SettingsModal = ({ settings, onSave, onClose, currentGameMode }: Se
   ];
 
   // Determine if board size should be disabled based on game mode
-  const isBoardSizeSelectable = currentGameMode === 'ai' || currentGameMode === 'friend' || !currentGameMode;
+  // We can only enable it if there's no game in progress, or if we're in AI or friend mode
+  // The App component will enforce the restriction for non-normal game types
+  const isBoardSizeSelectable = !currentGameMode || currentGameMode === 'ai' || currentGameMode === 'friend';
 
   const handleSave = () => {
     playClickSound(); // Provide audio feedback
@@ -494,7 +496,7 @@ export const SettingsModal = ({ settings, onSave, onClose, currentGameMode }: Se
                 
                 {!isBoardSizeSelectable && (
                   <div className="mt-2 text-xs text-amber-600 dark:text-amber-400 bg-amber-100/50 dark:bg-amber-900/30 p-2 rounded-md">
-                    Board size can only be changed before starting a game or in Friend/AI mode.
+                    Board size can only be changed in AI or Friend mode.
                   </div>
                 )}
               </SettingsSection>

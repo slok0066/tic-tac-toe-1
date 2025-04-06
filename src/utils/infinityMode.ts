@@ -20,11 +20,11 @@ export const processInfinityMove = (
   fadingSymbols: number[];
   nextFadingSymbols: number[];
 } => {
-  console.log(`Processing move for ${player} at index ${index}. Current history length: ${moveHistory.length}`);
-  console.log("Current move history:", moveHistory.map(m => `${m.player}@${m.index}:${m.timestamp}`).join(', '));
-  
-  // Create a copy of the board
+  // Create a fresh copy of the board and moveHistory
   const boardCopy = [...board];
+  const cleanMoveHistory = Array.isArray(moveHistory) ? [...moveHistory] : [];
+  
+  console.log(`Processing move for ${player} at index ${index}. Moves in history: ${cleanMoveHistory.length}`);
   
   // Update the board with the player's move
   boardCopy[index] = player;
@@ -36,51 +36,49 @@ export const processInfinityMove = (
     timestamp: Date.now()
   };
   
-  // Add this move to history first
-  let newMoveHistory = [...moveHistory, newMove];
+  // Add this move to history
+  const newMoveHistory = [...cleanMoveHistory, newMove];
   
   // Filter the moves by the current player
   const playerMoves = newMoveHistory.filter(move => move.player === player);
-  console.log(`${player} has ${playerMoves.length} moves after adding this one`);
+  console.log(`${player} now has ${playerMoves.length} moves in total`);
   
   // Check if player will have more than 3 symbols on the board
   let fadingSymbols: number[] = [];
   
-  // If this is the 4th or greater symbol, immediately remove the oldest one
+  // If this is the 4th symbol, remove the oldest one
   if (playerMoves.length > 3) {
-    // Find the oldest move for this player
+    // Sort moves by timestamp to find the oldest
     playerMoves.sort((a, b) => a.timestamp - b.timestamp);
     const oldestMove = playerMoves[0];
-    console.log(`Removing oldest ${player} move at index ${oldestMove.index}, timestamp ${oldestMove.timestamp}`);
+    console.log(`Removing oldest ${player} move at index ${oldestMove.index}`);
     
-    // Track the removed symbol
+    // Mark for fading
     fadingSymbols = [oldestMove.index];
     
-    // Remove the oldest symbol from the board
+    // Remove from board
     boardCopy[oldestMove.index] = null;
     
     // Remove the oldest move from history
-    newMoveHistory = newMoveHistory.filter(
-      move => !(move.index === oldestMove.index && move.player === player)
+    const filteredHistory = newMoveHistory.filter(
+      move => !(move.player === player && move.index === oldestMove.index && move.timestamp === oldestMove.timestamp)
     );
+    
+    // Replace the move history
+    newMoveHistory.length = 0;
+    filteredHistory.forEach(move => newMoveHistory.push(move));
   }
   
-  // Calculate the next player's symbols that will fade on their next move
+  // Calculate which symbols will fade on the next move (for the next player)
   const nextPlayer = player === 'X' ? 'O' : 'X';
   const nextPlayerMoves = newMoveHistory.filter(move => move.player === nextPlayer);
-  console.log(`${nextPlayer} has ${nextPlayerMoves.length} moves after this one`);
   
-  // Calculate which symbols will fade on the next move
   let nextFadingSymbols: number[] = [];
   if (nextPlayerMoves.length >= 3) {
+    // Sort by timestamp to find what would be removed next
     nextPlayerMoves.sort((a, b) => a.timestamp - b.timestamp);
     nextFadingSymbols = [nextPlayerMoves[0].index];
-    console.log(`Next fading symbol for ${nextPlayer}: ${nextFadingSymbols[0]}`);
   }
-
-  // Debug the final board state
-  console.log("Final board state:", boardCopy.map((cell, i) => `${i}:${cell || 'null'}`).join(', '));
-  console.log("New move history:", newMoveHistory.map(m => `${m.player}@${m.index}`).join(', '));
   
   return {
     board: boardCopy,

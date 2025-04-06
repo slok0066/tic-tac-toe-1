@@ -1,5 +1,5 @@
 import { io } from 'socket.io-client';
-import { ClientToServerEvents, ServerToClientEvents } from "../types";
+import { ClientToServerEvents, ServerToClientEvents, Player, Winner } from "../types";
 
 // Log connection attempt
 console.log('Attempting to connect to socket server...');
@@ -57,16 +57,41 @@ export const cancelRandomMatch = () => {
   socket.emit('cancel_random_match');
 };
 
+// Interface for the make_move event payload
+interface MakeMovePayload {
+  position: number;
+  symbol: string;
+  winner?: Winner;
+  winningLine?: number[] | null;
+}
+
 // Function to make a move
-export const makeMove = (index: number, symbol: string, currentPlayer: string) => {
+export const makeMove = (
+  index: number, 
+  symbol: string, 
+  currentPlayer: string, 
+  winner: Winner = null,
+  winningLine: number[] | null = null
+) => {
   // Only send move if it's our turn
   if (symbol !== currentPlayer) {
     console.log('Not your turn, cannot make move');
     return;
   }
   
-  console.log('Making move at position:', index, 'with symbol:', symbol);
-  socket.emit('make_move', { position: index, symbol });
+  const payload: MakeMovePayload = {
+    position: index,
+    symbol
+  };
+
+  // Add winner information if available
+  if (winner) {
+    payload.winner = winner;
+    payload.winningLine = winningLine;
+  }
+  
+  console.log('Making move at position:', index, 'with symbol:', symbol, winner ? `(Winner: ${winner})` : '');
+  socket.emit('make_move', payload);
 };
 
 // Function to request a rematch
